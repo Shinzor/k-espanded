@@ -162,6 +162,17 @@ class HotkeyRecorder(ft.Container):
             visible=False,
         )
 
+        # Manual input field for typing hotkey (for web mode)
+        self.manual_input = ft.TextField(
+            label="Type hotkey (e.g., ctrl+alt+p)",
+            value="",
+            width=200,
+            height=45,
+            visible=False,
+            on_submit=self._on_manual_submit,
+            hint_text="ctrl+alt+p",
+        )
+
         # Record button
         self.record_btn = ft.ElevatedButton(
             text="Record",
@@ -172,6 +183,15 @@ class HotkeyRecorder(ft.Container):
                 bgcolor={"": ft.Colors.BLUE_700},
                 color={"": ft.Colors.WHITE},
             ),
+        )
+
+        # Manual entry button (for web mode where Record doesn't work)
+        self.manual_btn = ft.OutlinedButton(
+            text="Type",
+            icon=ft.Icons.KEYBOARD,
+            on_click=self._on_manual_click,
+            height=36,
+            tooltip="Manually type the hotkey (for web browser mode)",
         )
 
         # Test button
@@ -208,10 +228,12 @@ class HotkeyRecorder(ft.Container):
                             ft.Row(
                                 controls=[
                                     self.record_btn,
+                                    self.manual_btn,
                                     self.test_btn,
                                 ],
                                 spacing=8,
                             ),
+                            self.manual_input,
                         ],
                         spacing=10,
                     ),
@@ -223,6 +245,52 @@ class HotkeyRecorder(ft.Container):
             spacing=6,
         )
         self.width = self.width_value
+
+    def _on_manual_click(self, e=None):
+        """Toggle manual input field."""
+        self.manual_input.visible = not self.manual_input.visible
+        if self.manual_input.visible:
+            self.manual_input.value = self._hotkey_value.replace("<", "").replace(">", "")
+            self.status_text.value = "Type hotkey like: ctrl+alt+p, ctrl+shift+e"
+            self.status_text.color = ft.Colors.BLUE_700
+            self.status_text.visible = True
+        else:
+            self.status_text.visible = False
+        if self._mounted:
+            self.update()
+
+    def _on_manual_submit(self, e=None):
+        """Handle manual hotkey input submission."""
+        if not self.manual_input.value:
+            return
+
+        raw_input = self.manual_input.value.strip().lower()
+
+        # Normalize the input
+        normalized = normalize_hotkey(raw_input)
+
+        # Validate - needs at least a modifier + key
+        parts = normalized.split("+")
+        has_modifier = any(p in ["<ctrl>", "<alt>", "<shift>", "<cmd>"] for p in parts)
+        has_key = any(p not in ["<ctrl>", "<alt>", "<shift>", "<cmd>"] for p in parts)
+
+        if has_modifier and has_key:
+            self._hotkey_value = normalized
+            self._update_display()
+            self.manual_input.visible = False
+            self.status_text.value = f"✓ Set to: {display_hotkey(normalized)}"
+            self.status_text.color = ft.Colors.GREEN_700
+            self.status_text.visible = True
+
+            if self.on_change_callback:
+                self.on_change_callback(self._hotkey_value)
+        else:
+            self.status_text.value = "Need modifier + key (e.g., ctrl+alt+p)"
+            self.status_text.color = ft.Colors.ORANGE_700
+            self.status_text.visible = True
+
+        if self._mounted:
+            self.update()
 
     def _update_display(self):
         """Update the display text."""
