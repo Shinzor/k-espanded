@@ -51,7 +51,6 @@ def create_quick_add_app(selected_text: str = ""):
                 ft.dropdown.Option("/", "/ (slash)"),
             ],
             width=100,
-            height=45,
             bgcolor=bg_surface,
             border_color=border_default,
             focused_border_color=primary,
