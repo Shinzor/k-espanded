@@ -7,6 +7,11 @@ It receives the selected text via a temporary file path as command line argument
 
 import sys
 import os
+
+if sys.platform == "win32":
+    os.environ.setdefault("FLET_DESKTOP_WINDOW_DISABLE_GPU", "true")
+    os.environ.setdefault("ANGLE_DEFAULT_PLATFORM", "swiftshader")
+
 import flet as ft
 from pathlib import Path
 
