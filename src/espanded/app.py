@@ -1,15 +1,18 @@
-"""Flet application setup and configuration."""
+"""PySide6 application setup and configuration."""
 
-import flet as ft
 import logging
 import sys
 import traceback
 from pathlib import Path
 
+from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Qt
+
 from espanded.core.app_state import get_app_state
 from espanded.ui.theme import ThemeManager, ThemeSettings
 from espanded.ui.main_window import MainWindow
-from espanded.ui.first_run_wizard import FirstRunWizard
+from espanded.ui.system_tray import SystemTray
+from espanded.ui.quick_add import QuickAddPopup
 from espanded.services.hotkey_service import get_hotkey_service
 
 # Configure logging
@@ -37,33 +40,36 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def create_app(page: ft.Page):
-    """Create and configure the main Flet application."""
+def create_app() -> tuple[MainWindow | None, dict]:
+    """Create and configure the Qt application.
+
+    Returns:
+        tuple: (MainWindow instance or None, dict of initialized services)
+    """
     print("=" * 80)
-    print("ESPANDED STARTUP - BEGIN")
+    print("ESPANDED STARTUP - BEGIN (Qt)")
     print("=" * 80)
+
+    services = {
+        'hotkey_service': None,
+        'sync_manager': None,
+        'tray': None,
+        'cleanup_func': None,
+    }
 
     try:
         # Initialize app state
-        print("[1/10] Initializing app state...")
+        print("[1/7] Initializing app state...")
         app_state = get_app_state()
         print("✓ App state initialized")
 
-        # Basic page setup
-        print("[2/10] Setting up page properties...")
-        page.title = "Espanded"
-        page.window.width = 1200
-        page.window.height = 800
-        page.window.min_width = 900
-        page.window.min_height = 600
-        print("✓ Page properties set")
-
-        # Initialize theme manager from settings
-        print("[3/10] Loading settings...")
+        # Load settings
+        print("[2/7] Loading settings...")
         settings = app_state.settings
         print(f"✓ Settings loaded: theme={settings.theme}, has_imported={settings.has_imported}")
 
-        print("[4/10] Initializing theme manager...")
+        # Initialize theme manager
+        print("[3/7] Initializing theme manager...")
         theme_settings = ThemeSettings(
             theme=settings.theme,
             custom_colors=settings.custom_colors,
@@ -72,20 +78,14 @@ def create_app(page: ft.Page):
         app_state.theme_manager = theme_manager
         print("✓ Theme manager created")
 
-        print("[5/10] Applying theme to page...")
-        theme_manager.apply_to_page(page)
-        print("✓ Theme applied to page")
     except Exception as e:
         print(f"✗ ERROR during initialization: {e}")
         traceback.print_exc()
-        # Show error in window
-        page.add(ft.Text(f"Initialization Error: {e}", color=ft.Colors.RED))
-        page.update()
-        return
+        return None, services
 
     # Initialize hotkey service
     try:
-        print("[6/10] Initializing hotkey service...")
+        print("[4/7] Initializing hotkey service...")
         hotkey_service = get_hotkey_service()
         if hotkey_service.is_available:
             # Use the quick add hotkey from settings
@@ -98,6 +98,7 @@ def create_app(page: ft.Page):
             print(f"✓ Hotkey service started: {quick_add_hotkey} (enabled: {hotkey_service.is_enabled})")
         else:
             print("⚠ Hotkey service not available (pynput not installed or failed to import)")
+        services['hotkey_service'] = hotkey_service
     except Exception as e:
         print(f"⚠ WARNING: Hotkey service initialization failed: {e}")
         traceback.print_exc()
@@ -105,7 +106,7 @@ def create_app(page: ft.Page):
 
     # Initialize sync manager (if available and configured)
     try:
-        print("[7/10] Initializing sync manager...")
+        print("[5/7] Initializing sync manager...")
         sync_manager = None
         if SYNC_AVAILABLE and SyncManager and settings.github_repo and settings.github_token:
             try:
@@ -136,51 +137,25 @@ def create_app(page: ft.Page):
 
         # Store sync manager in app state for later access
         app_state.sync_manager = sync_manager
+        services['sync_manager'] = sync_manager
     except Exception as e:
         print(f"⚠ WARNING: Sync manager initialization failed: {e}")
         traceback.print_exc()
         app_state.sync_manager = None
         # Continue without sync
 
-    # Initialize system tray (if available)
+    # Initialize system tray (Qt-based)
     try:
-        print("[8/10] Initializing system tray...")
+        print("[6/7] Initializing system tray...")
         tray = None
-        if PYSTRAY_AVAILABLE and SystemTray and settings.minimize_to_tray:
-            try:
-                tray = SystemTray()
-
-                def show_main_window():
-                    page.window.visible = True
-                    page.window.focused = True
-                    page.update()
-
-                def trigger_quick_add():
-                    from espanded.ui.quick_add import show_quick_add_popup
-                    show_quick_add_popup("")
-
-                def quit_app():
-                    cleanup_and_exit()
-
-                def toggle_hotkeys(enabled: bool):
-                    if enabled:
-                        hotkey_service.enable()
-                    else:
-                        hotkey_service.disable()
-
-                tray.set_callbacks(
-                    on_show=show_main_window,
-                    on_quick_add=trigger_quick_add,
-                    on_quit=quit_app,
-                    on_toggle_hotkeys=toggle_hotkeys,
-                )
-                tray.run_detached()
-                print("✓ System tray initialized")
-            except Exception as e:
-                print(f"⚠ Failed to initialize system tray: {e}")
-                tray = None
+        # Always create tray if minimize_to_tray is enabled
+        # (Qt system tray is always available, doesn't depend on pystray)
+        if settings.minimize_to_tray:
+            tray = SystemTray(theme_manager)
+            print("✓ Qt system tray created")
         else:
-            print("✓ System tray skipped (not available or disabled)")
+            print("✓ System tray skipped (minimize_to_tray disabled)")
+        services['tray'] = tray
     except Exception as e:
         print(f"⚠ WARNING: System tray initialization failed: {e}")
         traceback.print_exc()
@@ -190,85 +165,39 @@ def create_app(page: ft.Page):
     def cleanup_and_exit():
         """Cleanup resources and exit."""
         # Stop hotkey service
-        hotkey_service.stop()
+        if services['hotkey_service']:
+            services['hotkey_service'].stop()
 
         # Stop sync manager
-        if sync_manager:
-            sync_manager.close()
+        if services['sync_manager']:
+            services['sync_manager'].close()
 
-        # Stop tray
-        if tray:
-            tray.stop()
+        # Stop tray (Qt tray uses cleanup method)
+        if services['tray']:
+            services['tray'].cleanup()
 
         # Save settings
         app_state.save_settings()
 
-        # Close window
-        page.window.destroy()
+    services['cleanup_func'] = cleanup_and_exit
 
-    # Handle window events
-    print("[9/10] Setting up window event handlers...")
-    def on_window_event(e):
-        if e.data == "close":
-            if tray and settings.minimize_to_tray:
-                # Minimize to tray instead of closing
-                page.window.visible = False
-                page.update()
-            else:
-                cleanup_and_exit()
-
-    page.window.on_event = on_window_event
-    page.window.prevent_close = True
-    print("✓ Window event handlers configured")
-
-    # Check if this is first run
+    # Create main window
     try:
-        print("[10/10] Building UI...")
-        if not settings.has_imported:
-            # Show first run wizard
-            print("  Showing first run wizard...")
-            def on_wizard_complete():
-                print("  Wizard complete - transitioning to main window...")
-                # Clear page and show main window
-                page.clean()
-                main_window = MainWindow(page, theme_manager)
-                page.add(main_window)
-                page.update()
-                print("✓ Main window displayed after wizard")
+        print("[7/7] Creating main window...")
+        main_window = MainWindow(
+            theme_manager,
+            tray=services['tray'],
+            hotkey_service=services['hotkey_service'],
+        )
+        print("✓ Main window created with custom title bar, sidebar, and content area")
 
-            wizard = FirstRunWizard(theme=theme_manager, on_complete=on_wizard_complete)
-            page.add(wizard)
-            print("✓ First run wizard added to page")
-        else:
-            # Create and add main window
-            print("  Creating main window...")
-            main_window = MainWindow(page, theme_manager)
-            print("  Adding main window to page...")
-            page.add(main_window)
-            print("✓ Main window added to page")
+        print("=" * 80)
+        print("ESPANDED STARTUP - COMPLETE (Qt)")
+        print("=" * 80)
 
-        print("  Calling page.update()...")
-        page.update()
-        print("✓ Page updated successfully")
-        print("=" * 80)
-        print("ESPANDED STARTUP - COMPLETE")
-        print("=" * 80)
+        return main_window, services
+
     except Exception as e:
-        print(f"✗ ERROR during UI creation: {e}")
+        print(f"✗ ERROR during window creation: {e}")
         traceback.print_exc()
-        # Try to show error
-        try:
-            page.clean()
-            page.add(
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text("Startup Error", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.RED),
-                        ft.Text(f"Error: {e}", color=ft.Colors.RED),
-                        ft.Text("Check console for details", size=12),
-                    ]),
-                    padding=20,
-                )
-            )
-            page.update()
-        except:
-            pass
+        return None, services

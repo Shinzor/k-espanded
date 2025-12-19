@@ -1,9 +1,11 @@
-"""Theme system with dark/light modes and color customization."""
+"""Qt theme system with dark/light modes and color customization."""
 
 from dataclasses import dataclass, field, asdict
-from typing import Any
 
-import flet as ft
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtCore import Qt
+import pyqtdarktheme
 
 try:
     import darkdetect
@@ -141,7 +143,7 @@ def get_default_settings() -> ThemeSettings:
 
 
 class ThemeManager:
-    """Manages theme state and color overrides."""
+    """Manages Qt theme state and color overrides."""
 
     def __init__(self, settings: ThemeSettings | None = None):
         self.settings = settings or ThemeSettings()
@@ -213,53 +215,283 @@ class ThemeManager:
         self.settings.custom_colors.clear()
         self._load_theme()
 
-    def apply_to_page(self, page: ft.Page):
-        """Apply theme colors to Flet page."""
-        colors = self.colors
+    def apply_to_app(self, app: QApplication):
+        """Apply theme colors to Qt application."""
+        # Use pyqtdarktheme as base, then customize with our colors
+        if self._is_dark:
+            pyqtdarktheme.setup_theme("dark")
+        else:
+            pyqtdarktheme.setup_theme("light")
 
-        # Set theme mode
-        page.theme_mode = ft.ThemeMode.DARK if self._is_dark else ft.ThemeMode.LIGHT
+        # Apply custom stylesheet for our specific colors
+        app.setStyleSheet(self._generate_stylesheet())
 
-        # Create custom theme
-        page.theme = ft.Theme(
-            color_scheme=ft.ColorScheme(
-                primary=colors.primary,
-                on_primary=colors.text_inverse,
-                primary_container=colors.primary_muted,
-                secondary=colors.primary,
-                surface=colors.bg_surface,
-                on_surface=colors.text_primary,
-                surface_variant=colors.bg_elevated,
-                on_surface_variant=colors.text_secondary,
-                background=colors.bg_base,
-                on_background=colors.text_primary,
-                error=colors.error,
-                on_error=colors.text_inverse,
-                outline=colors.border_default,
-                outline_variant=colors.border_muted,
-            ),
-        )
+    def _generate_stylesheet(self) -> str:
+        """Generate Qt stylesheet from color palette."""
+        colors = self._current_palette
 
-        page.dark_theme = page.theme
-        page.bgcolor = colors.bg_base
-        page.update()
+        return f"""
+            /* Main Window and Base Colors */
+            QMainWindow {{
+                background-color: {colors.bg_base};
+                color: {colors.text_primary};
+            }}
 
-    def get_container_style(self, variant: str = "surface") -> dict[str, Any]:
-        """Get styling dict for containers based on variant."""
-        colors = self.colors
+            QWidget {{
+                background-color: {colors.bg_base};
+                color: {colors.text_primary};
+            }}
 
-        styles = {
-            "surface": {
-                "bgcolor": colors.bg_surface,
-                "border": ft.border.all(1, colors.border_muted),
-            },
-            "elevated": {
-                "bgcolor": colors.bg_elevated,
-                "border": ft.border.all(1, colors.border_default),
-            },
-            "sidebar": {
-                "bgcolor": colors.bg_sidebar,
-                "border": ft.border.only(right=ft.BorderSide(1, colors.border_muted)),
-            },
-        }
-        return styles.get(variant, styles["surface"])
+            /* Containers and Panels */
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border: 1px solid {colors.border_muted};
+                border-radius: 4px;
+            }}
+
+            /* Text Input */
+            QLineEdit, QTextEdit, QPlainTextEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 6px;
+                selection-background-color: {colors.primary};
+                selection-color: {colors.text_inverse};
+            }}
+
+            QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+                border: 1px solid {colors.border_focus};
+            }}
+
+            /* Buttons */
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: 500;
+            }}
+
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+
+            QPushButton:pressed {{
+                background-color: {colors.primary_muted};
+            }}
+
+            QPushButton:disabled {{
+                background-color: {colors.border_muted};
+                color: {colors.text_tertiary};
+            }}
+
+            /* Secondary Buttons */
+            QPushButton[secondary="true"] {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+            }}
+
+            QPushButton[secondary="true"]:hover {{
+                background-color: {colors.bg_surface};
+                border-color: {colors.primary};
+            }}
+
+            /* List Widgets */
+            QListWidget, QTreeWidget, QTableWidget {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                outline: none;
+            }}
+
+            QListWidget::item, QTreeWidget::item, QTableWidget::item {{
+                padding: 8px;
+                border-bottom: 1px solid {colors.border_muted};
+            }}
+
+            QListWidget::item:hover, QTreeWidget::item:hover, QTableWidget::item:hover {{
+                background-color: {colors.entry_hover};
+            }}
+
+            QListWidget::item:selected, QTreeWidget::item:selected, QTableWidget::item:selected {{
+                background-color: {colors.entry_selected};
+                color: {colors.text_primary};
+            }}
+
+            /* ComboBox */
+            QComboBox {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 6px;
+            }}
+
+            QComboBox:focus {{
+                border: 1px solid {colors.border_focus};
+            }}
+
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+
+            QComboBox QAbstractItemView {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                selection-background-color: {colors.entry_selected};
+            }}
+
+            /* Scrollbars */
+            QScrollBar:vertical {{
+                background-color: {colors.bg_surface};
+                width: 12px;
+                border: none;
+            }}
+
+            QScrollBar::handle:vertical {{
+                background-color: {colors.border_default};
+                border-radius: 6px;
+                min-height: 20px;
+            }}
+
+            QScrollBar::handle:vertical:hover {{
+                background-color: {colors.text_tertiary};
+            }}
+
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+
+            QScrollBar:horizontal {{
+                background-color: {colors.bg_surface};
+                height: 12px;
+                border: none;
+            }}
+
+            QScrollBar::handle:horizontal {{
+                background-color: {colors.border_default};
+                border-radius: 6px;
+                min-width: 20px;
+            }}
+
+            QScrollBar::handle:horizontal:hover {{
+                background-color: {colors.text_tertiary};
+            }}
+
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
+
+            /* Labels */
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+
+            QLabel[secondary="true"] {{
+                color: {colors.text_secondary};
+            }}
+
+            QLabel[tertiary="true"] {{
+                color: {colors.text_tertiary};
+            }}
+
+            /* Checkboxes and Radio Buttons */
+            QCheckBox, QRadioButton {{
+                color: {colors.text_primary};
+                spacing: 8px;
+            }}
+
+            QCheckBox::indicator, QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 1px solid {colors.border_default};
+                border-radius: 3px;
+                background-color: {colors.bg_elevated};
+            }}
+
+            QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+                background-color: {colors.primary};
+                border-color: {colors.primary};
+            }}
+
+            /* Menu Bar */
+            QMenuBar {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_primary};
+                border-bottom: 1px solid {colors.border_muted};
+            }}
+
+            QMenuBar::item:selected {{
+                background-color: {colors.entry_hover};
+            }}
+
+            QMenu {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+            }}
+
+            QMenu::item:selected {{
+                background-color: {colors.entry_selected};
+            }}
+
+            /* Status Bar */
+            QStatusBar {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_secondary};
+                border-top: 1px solid {colors.border_muted};
+            }}
+
+            /* Tab Widget */
+            QTabWidget::pane {{
+                background-color: {colors.bg_surface};
+                border: 1px solid {colors.border_default};
+            }}
+
+            QTabBar::tab {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_secondary};
+                padding: 8px 16px;
+                border: 1px solid {colors.border_muted};
+                border-bottom: none;
+            }}
+
+            QTabBar::tab:selected {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_primary};
+                border-bottom: 2px solid {colors.primary};
+            }}
+
+            QTabBar::tab:hover {{
+                background-color: {colors.entry_hover};
+            }}
+
+            /* Tooltips */
+            QToolTip {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                padding: 4px;
+            }}
+
+            /* Splitter */
+            QSplitter::handle {{
+                background-color: {colors.border_muted};
+            }}
+
+            QSplitter::handle:hover {{
+                background-color: {colors.border_default};
+            }}
+        """
+
+    def get_color(self, color_name: str) -> QColor:
+        """Get QColor object for a named color from the palette."""
+        color_value = getattr(self._current_palette, color_name, "#000000")
+        return QColor(color_value)

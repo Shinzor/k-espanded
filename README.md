@@ -4,7 +4,7 @@ A modern, beautiful desktop UI for managing [Espanso](https://espanso.org/) text
 
 ## Features
 
-- **Intuitive UI**: Clean, modern interface built with Flet for managing your text expansions
+- **Intuitive UI**: Clean, modern interface built with PySide6 (Qt6) for managing your text expansions
 - **Espanso Integration**: Direct import/export from your existing Espanso configuration
 - **GitHub Sync**: Sync your configurations across devices using GitHub repositories
 - **Quick Add**: Global hotkey for adding expansions on the fly
@@ -30,21 +30,22 @@ A modern, beautiful desktop UI for managing [Espanso](https://espanso.org/) text
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/espanded.git
-cd espanded
+git clone https://github.com/Shinzor/k-espanded
+cd k-espanded
+uv venv
 
 # Install with uv
 uv pip install -e .
 
-# For development with hotkey support
-uv pip install -e ".[hotkeys,dev]"
+# For development
+uv pip install -e ".[dev]"
 ```
 
 ### Using pip
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/espanded.git
+git clone https://github.com/Shinzor/k-espanded
 cd espanded
 
 # Create virtual environment
@@ -54,8 +55,8 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install dependencies
 pip install -e .
 
-# For development with hotkey support
-pip install -e ".[hotkeys,dev]"
+# For development
+pip install -e ".[dev]"
 ```
 
 ## Quick Start

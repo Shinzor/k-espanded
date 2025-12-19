@@ -1,148 +1,201 @@
-"""History view component showing change log."""
+"""History view showing entry change log."""
 
-import flet as ft
 from datetime import datetime, timedelta
-from typing import Callable
 
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QComboBox,
+    QFrame,
+    QScrollArea,
+    QMessageBox,
+)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
+
+from espanded.ui.theme import ThemeManager
 from espanded.core.app_state import get_app_state
 from espanded.core.models import HistoryEntry
-from espanded.ui.theme import ThemeManager
 
 
-class HistoryView(ft.Container):
+class HistoryView(QWidget):
     """History view showing entry change log with filtering."""
 
-    def __init__(self, theme: ThemeManager, on_close: Callable[[], None]):
-        super().__init__()
-        self.theme = theme
-        self.on_close = on_close
+    # Signals
+    close_requested = Signal()
+    entry_restored = Signal(str)  # Emits entry_id
+
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.theme_manager = theme_manager
         self.app_state = get_app_state()
 
         # State
-        self.filter_action = "all"  # all, created, modified, deleted, restored
+        self.filter_action = "all"
         self.search_query = ""
-        self._mounted = False
 
-        self._build()
+        self._setup_ui()
 
-    def _build(self):
+    def _setup_ui(self):
         """Build the history view layout."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Header
-        header = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Icon(ft.Icons.HISTORY, size=24, color=colors.primary),
-                            ft.Text(
-                                "History",
-                                size=20,
-                                weight=ft.FontWeight.W_600,
-                                color=colors.text_primary,
-                            ),
-                        ],
-                        spacing=12,
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_color=colors.text_secondary,
-                        on_click=lambda e: self.on_close(),
-                        tooltip="Close",
-                    ),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
+        header = self._create_header()
+        layout.addWidget(header)
 
         # Filter and search bar
-        self.filter_dropdown = ft.Dropdown(
-            label="Filter",
-            value="all",
-            options=[
-                ft.dropdown.Option("all", "All changes"),
-                ft.dropdown.Option("created", "Created"),
-                ft.dropdown.Option("modified", "Modified"),
-                ft.dropdown.Option("deleted", "Deleted"),
-                ft.dropdown.Option("restored", "Restored"),
-            ],
-            width=200,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            on_change=self._on_filter_change,
-        )
+        filter_bar = self._create_filter_bar()
+        layout.addWidget(filter_bar)
 
-        self.search_field = ft.TextField(
-            label="Search",
-            hint_text="Search by trigger name...",
-            expand=True,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            on_change=self._on_search_change,
-        )
+        # Scrollable history list
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {colors.bg_base};
+                border: none;
+            }}
+        """)
 
-        filter_bar = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.filter_dropdown,
-                    self.search_field,
-                ],
-                spacing=12,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
+        self.history_container = QWidget()
+        self.history_layout = QVBoxLayout(self.history_container)
+        self.history_layout.setContentsMargins(20, 0, 20, 20)
+        self.history_layout.setSpacing(0)
+        self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # History list
-        self.history_list = ft.Column(
-            controls=[],
-            spacing=0,
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-        )
+        scroll.setWidget(self.history_container)
+        layout.addWidget(scroll, stretch=1)
 
-        # Layout
-        self.content = ft.Column(
-            controls=[
-                header,
-                filter_bar,
-                ft.Container(
-                    content=self.history_list,
-                    expand=True,
-                ),
-            ],
-            spacing=0,
-            expand=True,
-        )
+    def _create_header(self) -> QWidget:
+        """Create history header."""
+        colors = self.theme_manager.colors
 
-        self.expand = True
-        self.padding = 20
+        header = QWidget()
+        header.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+            }}
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 20, 20, 16)
 
-    def did_mount(self):
-        """Called when control is added to page - safe to load data."""
-        self._mounted = True
-        self._refresh_history()
+        # Icon and title
+        title_row = QWidget()
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(12)
 
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
+        icon_label = QLabel("\u1F4DC")  # Scroll emoji
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 24px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(icon_label)
 
-    def _on_filter_change(self, e):
+        title = QLabel("History")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(title)
+
+        header_layout.addWidget(title_row)
+        header_layout.addStretch()
+
+        # Close button
+        close_btn = QPushButton("\u2715")
+        close_btn.setFixedSize(32, 32)
+        close_btn.clicked.connect(self.close_requested.emit)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_elevated};
+            }}
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(close_btn)
+
+        return header
+
+    def _create_filter_bar(self) -> QWidget:
+        """Create filter and search bar."""
+        colors = self.theme_manager.colors
+
+        filter_bar = QWidget()
+        filter_bar.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+                border-bottom: 1px solid {colors.border_muted};
+            }}
+        """)
+        filter_layout = QHBoxLayout(filter_bar)
+        filter_layout.setContentsMargins(20, 0, 20, 16)
+        filter_layout.setSpacing(12)
+
+        # Filter dropdown
+        self.filter_dropdown = QComboBox()
+        self.filter_dropdown.addItem("All changes", "all")
+        self.filter_dropdown.addItem("Created", "created")
+        self.filter_dropdown.addItem("Modified", "modified")
+        self.filter_dropdown.addItem("Deleted", "deleted")
+        self.filter_dropdown.addItem("Restored", "restored")
+        self.filter_dropdown.currentIndexChanged.connect(self._on_filter_change)
+        self.filter_dropdown.setFixedWidth(200)
+        filter_layout.addWidget(self.filter_dropdown)
+
+        # Search field
+        self.search_field = QLineEdit()
+        self.search_field.setPlaceholderText("Search by trigger name...")
+        self.search_field.textChanged.connect(self._on_search_change)
+        filter_layout.addWidget(self.search_field, stretch=1)
+
+        return filter_bar
+
+    def _on_filter_change(self):
         """Handle filter dropdown change."""
-        self.filter_action = e.control.value
+        self.filter_action = self.filter_dropdown.currentData()
         self._refresh_history()
 
-    def _on_search_change(self, e):
+    def _on_search_change(self, text: str):
         """Handle search field change."""
-        self.search_query = e.control.value.lower()
+        self.search_query = text.lower()
         self._refresh_history()
 
     def _refresh_history(self):
         """Refresh the history list."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
+
+        # Clear existing items
+        while self.history_layout.count():
+            child = self.history_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
         # Get history entries
         all_history = self.app_state.database.get_history(limit=200)
@@ -161,66 +214,45 @@ class HistoryView(ft.Container):
         # Group by date
         grouped = self._group_by_date(all_history)
 
-        # Build list
-        self.history_list.controls.clear()
-
         if not grouped:
             # Empty state
-            self.history_list.controls.append(
-                ft.Container(
-                    content=ft.Column(
-                        controls=[
-                            ft.Icon(
-                                ft.Icons.HISTORY_OUTLINED,
-                                size=64,
-                                color=colors.text_tertiary,
-                            ),
-                            ft.Text(
-                                "No history found",
-                                size=16,
-                                color=colors.text_secondary,
-                            ),
-                            ft.Text(
-                                "Changes to entries will appear here",
-                                size=12,
-                                color=colors.text_tertiary,
-                            ),
-                        ],
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=8,
-                    ),
-                    alignment=ft.alignment.center,
-                    expand=True,
-                )
-            )
-        else:
-            for date_label, entries in grouped:
-                # Date header
-                self.history_list.controls.append(
-                    ft.Container(
-                        content=ft.Text(
-                            date_label,
-                            size=14,
-                            weight=ft.FontWeight.W_600,
-                            color=colors.text_primary,
-                        ),
-                        margin=ft.margin.only(top=16, bottom=8),
-                    )
-                )
+            self._show_empty_state()
+            return
 
-                self.history_list.controls.append(
-                    ft.Divider(height=1, color=colors.border_muted)
-                )
+        # Build list
+        for date_label, entries in grouped:
+            # Date header
+            date_header = QLabel(date_label)
+            date_font = QFont()
+            date_font.setPointSize(11)
+            date_font.setBold(True)
+            date_header.setFont(date_font)
+            date_header.setStyleSheet(f"""
+                QLabel {{
+                    color: {colors.text_primary};
+                    background-color: transparent;
+                    margin-top: 16px;
+                    margin-bottom: 8px;
+                }}
+            """)
+            self.history_layout.addWidget(date_header)
 
-                # History items
-                for history_entry in entries:
-                    self.history_list.controls.append(
-                        self._build_history_item(history_entry)
-                    )
+            # Divider
+            divider = QFrame()
+            divider.setFrameShape(QFrame.Shape.HLine)
+            divider.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {colors.border_muted};
+                    border: none;
+                    max-height: 1px;
+                }}
+            """)
+            self.history_layout.addWidget(divider)
 
-        # Only update if mounted
-        if self._mounted:
-            self.update()
+            # History items
+            for history_entry in entries:
+                item = self._build_history_item(history_entry)
+                self.history_layout.addWidget(item)
 
     def _group_by_date(self, history: list[HistoryEntry]) -> list[tuple[str, list[HistoryEntry]]]:
         """Group history entries by date."""
@@ -238,7 +270,6 @@ class HistoryView(ft.Container):
             elif entry_date == yesterday:
                 label = "Yesterday"
             else:
-                # Format as "Dec 15, 2024"
                 label = entry.timestamp.strftime("%b %d, %Y")
 
             if label not in groups:
@@ -263,11 +294,11 @@ class HistoryView(ft.Container):
 
         return result
 
-    def _build_history_item(self, history: HistoryEntry) -> ft.Container:
+    def _build_history_item(self, history: HistoryEntry) -> QFrame:
         """Build a single history item."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
 
-        # Get action icon and color
+        # Get action info
         action_info = self._get_action_info(history.action)
         icon = action_info["icon"]
         icon_color = action_info["color"]
@@ -276,282 +307,188 @@ class HistoryView(ft.Container):
         # Format timestamp
         time_str = history.timestamp.strftime("%I:%M %p")
 
-        # Build change details
-        change_details = []
-        if history.changes:
-            for key, value in history.changes.items():
-                if isinstance(value, dict) and "old" in value and "new" in value:
-                    old_val = value["old"]
-                    new_val = value["new"]
+        # Build item
+        item = QFrame()
+        item.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border: 1px solid {colors.border_muted};
+                border-radius: 8px;
+                margin-bottom: 4px;
+                padding: 12px;
+            }}
+        """)
+        item_layout = QHBoxLayout(item)
+        item_layout.setContentsMargins(8, 8, 8, 8)
 
-                    # Truncate long values
-                    if isinstance(old_val, str) and len(old_val) > 40:
-                        old_val = old_val[:40] + "..."
-                    if isinstance(new_val, str) and len(new_val) > 40:
-                        new_val = new_val[:40] + "..."
+        # Icon
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 18px;
+                color: {icon_color};
+                background-color: transparent;
+            }}
+        """)
+        item_layout.addWidget(icon_label)
 
-                    change_details.append(
-                        ft.Text(
-                            f"{key.capitalize()}: {old_val} → {new_val}",
-                            size=11,
-                            color=colors.text_tertiary,
-                            italic=True,
-                        )
-                    )
+        # Content
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(4)
 
-        # Build details button if there are changes
-        details_controls = []
-        if change_details:
-            details_controls.append(
-                ft.TextButton(
-                    text="View Details",
-                    icon=ft.Icons.INFO_OUTLINE,
-                    style=ft.ButtonStyle(
-                        color=colors.text_secondary,
-                        padding=ft.padding.all(4),
-                    ),
-                    on_click=lambda e, h=history: self._show_details(h),
-                )
-            )
+        # First row: time and action
+        first_row = QWidget()
+        first_layout = QHBoxLayout(first_row)
+        first_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Add restore button for deleted entries
+        time_label = QLabel(f"{time_str} - {action_text} ")
+        time_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 13px;
+                color: {colors.text_primary};
+                font-weight: 500;
+                background-color: transparent;
+            }}
+        """)
+        first_layout.addWidget(time_label)
+
+        trigger_label = QLabel(history.trigger_name)
+        trigger_font = QFont()
+        trigger_font.setBold(True)
+        trigger_label.setFont(trigger_font)
+        trigger_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 13px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        first_layout.addWidget(trigger_label)
+        first_layout.addStretch()
+
+        content_layout.addWidget(first_row)
+
+        # Action buttons
         if history.action == "deleted":
-            details_controls.append(
-                ft.TextButton(
-                    text="Restore",
-                    icon=ft.Icons.RESTORE,
-                    style=ft.ButtonStyle(
-                        color=colors.success,
-                        padding=ft.padding.all(4),
-                    ),
-                    on_click=lambda e, h=history: self._restore_entry(h),
-                )
-            )
+            button_row = QWidget()
+            button_layout = QHBoxLayout(button_row)
+            button_layout.setContentsMargins(0, 4, 0, 0)
+            button_layout.setSpacing(8)
 
-        return ft.Container(
-            content=ft.Row(
-                controls=[
-                    # Icon
-                    ft.Container(
-                        content=ft.Icon(icon, size=18, color=icon_color),
-                        width=32,
-                    ),
-                    # Content
-                    ft.Column(
-                        controls=[
-                            ft.Row(
-                                controls=[
-                                    ft.Text(
-                                        f"{time_str} - {action_text} ",
-                                        size=13,
-                                        color=colors.text_primary,
-                                        weight=ft.FontWeight.W_500,
-                                    ),
-                                    ft.Text(
-                                        history.trigger_name,
-                                        size=13,
-                                        color=colors.primary,
-                                        weight=ft.FontWeight.W_600,
-                                    ),
-                                ],
-                                spacing=4,
-                            ),
-                            *change_details,
-                            ft.Row(
-                                controls=details_controls,
-                                spacing=8,
-                            ) if details_controls else ft.Container(),
-                        ],
-                        spacing=4,
-                        expand=True,
-                    ),
-                ],
-                spacing=12,
-            ),
-            padding=ft.padding.symmetric(vertical=12, horizontal=8),
-            border_radius=8,
-            bgcolor=colors.bg_surface,
-            margin=ft.margin.only(bottom=4),
-        )
+            restore_btn = QPushButton("\u21BA Restore")
+            restore_btn.clicked.connect(lambda: self._restore_entry(history.entry_id))
+            restore_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {colors.success};
+                    color: {colors.text_inverse};
+                    border: none;
+                    border-radius: 4px;
+                    padding: 4px 12px;
+                    font-size: 12px;
+                }}
+                QPushButton:hover {{
+                    opacity: 0.8;
+                }}
+            """)
+            restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            button_layout.addWidget(restore_btn)
+            button_layout.addStretch()
+
+            content_layout.addWidget(button_row)
+
+        item_layout.addWidget(content, stretch=1)
+
+        return item
 
     def _get_action_info(self, action: str) -> dict:
         """Get icon, color, and text for an action."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
 
         action_map = {
             "created": {
-                "icon": ft.Icons.ADD_CIRCLE_OUTLINE,
+                "icon": "\u2795",  # Plus
                 "color": colors.success,
                 "text": "Created",
             },
             "modified": {
-                "icon": ft.Icons.EDIT_OUTLINED,
+                "icon": "\u270F",  # Pencil
                 "color": colors.info,
                 "text": "Modified",
             },
             "deleted": {
-                "icon": ft.Icons.DELETE_OUTLINE,
+                "icon": "\u2716",  # X
                 "color": colors.error,
                 "text": "Deleted",
             },
             "restored": {
-                "icon": ft.Icons.RESTORE,
+                "icon": "\u21BA",  # Counterclockwise arrow
                 "color": colors.warning,
                 "text": "Restored",
             },
         }
 
         return action_map.get(action, {
-            "icon": ft.Icons.CHANGE_CIRCLE_OUTLINED,
+            "icon": "\u25CF",  # Circle
             "color": colors.text_secondary,
             "text": action.capitalize(),
         })
 
-    def _show_details(self, history: HistoryEntry):
-        """Show details dialog for a history entry."""
-        if not self.page:
-            return
+    def _show_empty_state(self):
+        """Show empty state message."""
+        colors = self.theme_manager.colors
 
-        colors = self.theme.colors
+        empty = QWidget()
+        empty_layout = QVBoxLayout(empty)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.setSpacing(8)
 
-        # Build details content
-        details = []
-        if history.changes:
-            for key, value in history.changes.items():
-                if isinstance(value, dict) and "old" in value and "new" in value:
-                    details.append(
-                        ft.Container(
-                            content=ft.Column(
-                                controls=[
-                                    ft.Text(
-                                        key.capitalize(),
-                                        size=12,
-                                        weight=ft.FontWeight.W_600,
-                                        color=colors.text_secondary,
-                                    ),
-                                    ft.Container(
-                                        content=ft.Column(
-                                            controls=[
-                                                ft.Text("Old:", size=11, color=colors.text_tertiary),
-                                                ft.Container(
-                                                    content=ft.Text(
-                                                        str(value["old"]),
-                                                        size=12,
-                                                        color=colors.text_primary,
-                                                    ),
-                                                    bgcolor=colors.bg_elevated,
-                                                    padding=8,
-                                                    border_radius=4,
-                                                ),
-                                                ft.Text("New:", size=11, color=colors.text_tertiary),
-                                                ft.Container(
-                                                    content=ft.Text(
-                                                        str(value["new"]),
-                                                        size=12,
-                                                        color=colors.text_primary,
-                                                    ),
-                                                    bgcolor=colors.bg_elevated,
-                                                    padding=8,
-                                                    border_radius=4,
-                                                ),
-                                            ],
-                                            spacing=4,
-                                        ),
-                                        margin=ft.margin.only(top=4),
-                                    ),
-                                ],
-                                spacing=4,
-                            ),
-                            margin=ft.margin.only(bottom=16),
-                        )
-                    )
+        icon_label = QLabel("\u1F4DC")
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 64px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(icon_label)
 
-        # Create dialog
-        def close_dialog(e):
-            dialog.open = False
-            self.page.update()
+        msg_label = QLabel("No history found")
+        msg_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 16px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(msg_label)
 
-        # Build controls list
-        controls_list = [
-            ft.Text(
-                f"Entry: {history.trigger_name}",
-                size=13,
-                weight=ft.FontWeight.W_500,
-                color=colors.text_primary,
-            ),
-            ft.Text(
-                f"Action: {history.action.capitalize()}",
-                size=12,
-                color=colors.text_secondary,
-            ),
-            ft.Text(
-                f"Time: {history.timestamp.strftime('%b %d, %Y at %I:%M %p')}",
-                size=12,
-                color=colors.text_secondary,
-            ),
-            ft.Divider(height=16, color=colors.border_muted),
-        ]
+        desc_label = QLabel("Changes to entries will appear here")
+        desc_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(desc_label)
 
-        if details:
-            controls_list.extend(details)
-        else:
-            controls_list.append(
-                ft.Text(
-                    "No detailed changes recorded",
-                    size=12,
-                    color=colors.text_tertiary,
-                    italic=True,
-                )
-            )
+        self.history_layout.addWidget(empty)
 
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.INFO_OUTLINE, color=colors.primary),
-                    ft.Text("Change Details", color=colors.text_primary),
-                ],
-                spacing=8,
-            ),
-            content=ft.Container(
-                content=ft.Column(
-                    controls=controls_list,
-                    spacing=8,
-                    scroll=ft.ScrollMode.AUTO,
-                ),
-                width=500,
-                height=400,
-            ),
-            actions=[
-                ft.TextButton("Close", on_click=close_dialog),
-            ],
-            bgcolor=colors.bg_surface,
-        )
-
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
-
-    def _restore_entry(self, history: HistoryEntry):
+    def _restore_entry(self, entry_id: str):
         """Restore a deleted entry."""
-        success = self.app_state.entry_manager.restore_entry(history.entry_id)
+        success = self.app_state.entry_manager.restore_entry(entry_id)
 
         if success:
-            self._show_snackbar(f"Restored {history.trigger_name}")
+            self.entry_restored.emit(entry_id)
             self._refresh_history()
+            QMessageBox.information(self, "Entry Restored", "Entry has been restored successfully")
         else:
-            self._show_snackbar("Failed to restore entry", error=True)
-
-    def _show_snackbar(self, message: str, error: bool = False):
-        """Show a snackbar notification."""
-        colors = self.theme.colors
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(message, color=colors.text_primary),
-            bgcolor=colors.error if error else colors.success,
-            duration=2000,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+            QMessageBox.warning(self, "Restore Failed", "Failed to restore entry")
 
     def refresh(self):
         """Refresh the history view."""

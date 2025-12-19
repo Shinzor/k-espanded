@@ -1,251 +1,385 @@
-"""Quick Add popup window for rapid entry creation."""
+"""Quick Add popup dialog for rapid entry creation."""
 
-import flet as ft
-import subprocess
-import sys
-import json
-import tempfile
-import os
-from pathlib import Path
-from typing import Callable
+from PySide6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QTextEdit,
+    QPushButton,
+    QComboBox,
+    QFrame,
+)
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import QKeyEvent, QCursor
 
+from espanded.ui.theme import ThemeManager
 from espanded.core.app_state import get_app_state
-from espanded.ui.theme import ThemeManager, ThemeSettings, DARK_THEME
+from espanded.core.models import Entry
 
 
-class QuickAddPopup(ft.Column):
-    """Quick add popup for creating entries from selected text.
+class QuickAddPopup(QDialog):
+    """Quick Add popup for creating entries from selected text.
 
-    This popup appears when the global hotkey is pressed.
+    This frameless, always-on-top popup appears when the global hotkey is pressed.
     The selected text becomes the replacement, user just adds a trigger.
     """
 
-    def __init__(
-        self,
-        selected_text: str = "",
-        on_save: Callable[[str, str], None] | None = None,
-        on_cancel: Callable[[], None] | None = None,
-    ):
-        super().__init__()
+    entry_created = Signal(Entry)
+
+    def __init__(self, theme_manager: ThemeManager, selected_text: str = "", parent=None):
+        super().__init__(parent)
+        self.theme_manager = theme_manager
         self.selected_text = selected_text
-        self.on_save_callback = on_save
-        self.on_cancel_callback = on_cancel
+        self.app_state = get_app_state()
 
-        # Get theme from app state or create default
-        app_state = get_app_state()
-        self.theme = app_state.theme_manager if app_state.theme_manager else ThemeManager()
+        self._setup_window()
+        self._setup_ui()
+        self._connect_signals()
 
-        # Form fields
-        self.trigger_field: ft.TextField | None = None
-        self.prefix_dropdown: ft.Dropdown | None = None
-        self.replacement_field: ft.TextField | None = None
-        self.error_text: ft.Text | None = None
-        self._mounted = False
-
-    def did_mount(self):
-        """Called when control is added to page."""
-        self._mounted = True
-
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
-
-    def build(self):
-        colors = self.theme.colors
-
-        # Trigger prefix dropdown
-        self.prefix_dropdown = ft.Dropdown(
-            value=":",
-            options=[
-                ft.dropdown.Option("", "None"),
-                ft.dropdown.Option(":", ": (colon)"),
-                ft.dropdown.Option(";", "; (semicolon)"),
-                ft.dropdown.Option("/", "/ (slash)"),
-                ft.dropdown.Option("\\", "\\ (backslash)"),
-            ],
-            width=100,
-            height=40,
-            text_size=14,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.primary,
+    def _setup_window(self):
+        """Configure window properties."""
+        # Frameless, always on top
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
+        # Fixed size
+        self.setFixedSize(400, 320)
+
+        # Apply theme
+        colors = self.theme_manager.colors
+        self.setStyleSheet(
+            f"""
+            QDialog {{
+                background-color: {colors.bg_surface};
+                border: 2px solid {colors.primary};
+                border-radius: 8px;
+            }}
+        """
+        )
+
+    def _setup_ui(self):
+        """Build the popup UI."""
+        colors = self.theme_manager.colors
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        # Header
+        header = QHBoxLayout()
+        header.setSpacing(8)
+
+        title_label = QLabel("⚡ Quick Add Entry")
+        title_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_primary};
+                font-size: 16px;
+                font-weight: 600;
+                background: transparent;
+            }}
+        """
+        )
+        header.addWidget(title_label)
+        header.addStretch()
+
+        # Close button
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                border-radius: 12px;
+                font-size: 16px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.error};
+                color: {colors.text_inverse};
+            }}
+        """
+        )
+        close_btn.clicked.connect(self.reject)
+        header.addWidget(close_btn)
+
+        layout.addLayout(header)
+
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet(f"background-color: {colors.border_muted}; border: none;")
+        layout.addWidget(separator)
+
+        # Trigger row
+        trigger_row = QHBoxLayout()
+        trigger_row.setSpacing(8)
+
+        # Prefix dropdown
+        self.prefix_combo = QComboBox()
+        self.prefix_combo.addItems([":", ";", "/", "//", "::", "none"])
+        self.prefix_combo.setCurrentText(":")
+        self.prefix_combo.setFixedWidth(80)
+        self.prefix_combo.setStyleSheet(
+            f"""
+            QComboBox {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 6px 8px;
+                font-size: 13px;
+            }}
+            QComboBox:focus {{
+                border: 1px solid {colors.primary};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                selection-background-color: {colors.entry_selected};
+            }}
+        """
+        )
+        trigger_row.addWidget(self.prefix_combo)
 
         # Trigger input
-        self.trigger_field = ft.TextField(
-            label="Trigger",
-            hint_text="e.g., email, addr, sig",
-            autofocus=True,
-            width=200,
-            height=50,
-            text_size=14,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.primary,
-            on_submit=self._on_save,
+        self.trigger_input = QLineEdit()
+        self.trigger_input.setPlaceholderText("e.g., email, addr, sig")
+        self.trigger_input.setStyleSheet(
+            f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {colors.primary};
+            }}
+        """
         )
+        trigger_row.addWidget(self.trigger_input, stretch=1)
 
-        # Replacement preview (read-only, shows selected text)
-        self.replacement_field = ft.TextField(
-            label="Replacement (from selection)",
-            value=self.selected_text,
-            multiline=True,
-            min_lines=2,
-            max_lines=5,
-            read_only=True,
-            width=320,
-            text_size=14,
-            bgcolor=colors.bg_elevated,
-            border_color=colors.border_default,
+        layout.addLayout(trigger_row)
+
+        # Trigger label
+        trigger_label = QLabel("Trigger")
+        trigger_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """
         )
+        layout.addWidget(trigger_label)
 
-        # Error text
-        self.error_text = ft.Text(
-            "",
-            color=colors.error,
-            size=12,
-            visible=False,
+        # Replacement text area
+        self.replacement_text = QTextEdit()
+        self.replacement_text.setPlaceholderText("Replacement text...")
+        self.replacement_text.setPlainText(self.selected_text)
+        self.replacement_text.setMinimumHeight(100)
+        self.replacement_text.setStyleSheet(
+            f"""
+            QTextEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+                font-family: 'Consolas', 'Monaco', monospace;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {colors.primary};
+            }}
+        """
         )
+        layout.addWidget(self.replacement_text)
 
-        # Build layout
-        self.controls = [
-            # Header
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Icon(ft.Icons.FLASH_ON, color=colors.primary, size=24),
-                        ft.Text(
-                            "Quick Add Entry",
-                            size=18,
-                            weight=ft.FontWeight.BOLD,
-                            color=colors.text_primary,
-                        ),
-                    ],
-                    spacing=8,
-                ),
-                margin=ft.margin.only(bottom=16),
-            ),
+        # Replacement label
+        replacement_label = QLabel("Replacement" + (" (from selection)" if self.selected_text else ""))
+        replacement_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """
+        )
+        layout.addWidget(replacement_label)
 
-            # Trigger row
-            ft.Row(
-                [
-                    self.prefix_dropdown,
-                    self.trigger_field,
-                ],
-                spacing=8,
-            ),
+        # Error message
+        self.error_label = QLabel()
+        self.error_label.setVisible(False)
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.error};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """
+        )
+        layout.addWidget(self.error_label)
 
-            # Replacement preview
-            ft.Container(
-                content=self.replacement_field,
-                margin=ft.margin.only(top=8),
-            ),
+        # Buttons
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addStretch()
 
-            # Error text
-            self.error_text,
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setProperty("secondary", True)
+        cancel_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_surface};
+                border-color: {colors.primary};
+            }}
+        """
+        )
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
 
-            # Buttons
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.TextButton(
-                            "Cancel",
-                            on_click=self._on_cancel,
-                        ),
-                        ft.ElevatedButton(
-                            "Save",
-                            icon=ft.Icons.SAVE,
-                            bgcolor=colors.primary,
-                            color=colors.text_inverse,
-                            on_click=self._on_save,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.END,
-                    spacing=8,
-                ),
-                margin=ft.margin.only(top=16),
-            ),
-        ]
+        save_btn = QPushButton("Save")
+        save_btn.setDefault(True)
+        save_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 4px;
+                padding: 8px 20px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """
+        )
+        save_btn.clicked.connect(self._on_save)
+        button_row.addWidget(save_btn)
 
-        self.spacing = 4
-        self.width = 360
+        layout.addLayout(button_row)
 
-        return self
+    def _connect_signals(self):
+        """Connect signals."""
+        # Enter key in trigger field should focus replacement
+        self.trigger_input.returnPressed.connect(self.replacement_text.setFocus)
 
-    def _on_save(self, e=None):
+    def _on_save(self):
         """Handle save button click."""
-        trigger = self.trigger_field.value.strip() if self.trigger_field else ""
-        prefix = self.prefix_dropdown.value if self.prefix_dropdown else ":"
+        # Get values
+        trigger = self.trigger_input.text().strip()
+        prefix = self.prefix_combo.currentText()
+        replacement = self.replacement_text.toPlainText().strip()
 
         # Validation
         if not trigger:
             self._show_error("Please enter a trigger")
             return
 
-        if not self.selected_text:
-            self._show_error("No text selected")
+        if not replacement:
+            self._show_error("Please enter replacement text")
             return
 
-        # Build full trigger with prefix
-        full_trigger = f"{prefix}{trigger}"
+        # Build full trigger
+        if prefix == "none":
+            full_trigger = trigger
+        else:
+            full_trigger = f"{prefix}{trigger}"
 
-        if self.on_save_callback:
-            self.on_save_callback(full_trigger, self.selected_text)
+        # Create entry
+        try:
+            entry = Entry(
+                id="",  # Will be generated by entry manager
+                trigger=full_trigger,
+                replacement=replacement,
+                description="",
+                tags=[],
+                category="",
+                is_regex=False,
+                case_sensitive=False,
+                word=True,
+                propagate_case=False,
+                uppercase_style=None,
+            )
 
-    def _on_cancel(self, e=None):
-        """Handle cancel button click."""
-        if self.on_cancel_callback:
-            self.on_cancel_callback()
+            # Save via entry manager
+            created_entry = self.app_state.entry_manager.create_entry(entry)
+
+            # Emit signal
+            self.entry_created.emit(created_entry)
+
+            # Close popup
+            self.accept()
+
+        except Exception as e:
+            self._show_error(f"Failed to create entry: {str(e)}")
 
     def _show_error(self, message: str):
         """Show error message."""
-        if self.error_text:
-            self.error_text.value = message
-            self.error_text.visible = True
-            if self._mounted:
-                self.update()
+        self.error_label.setText(message)
+        self.error_label.setVisible(True)
 
+    def show_at_cursor(self):
+        """Show popup near cursor position."""
+        # Get cursor position
+        cursor_pos = QCursor.pos()
 
-def _run_quick_add_subprocess(selected_text: str = ""):
-    """Run the quick add window as a subprocess.
+        # Calculate popup position (centered on cursor)
+        x = cursor_pos.x() - self.width() // 2
+        y = cursor_pos.y() - self.height() // 2
 
-    This avoids the 'signal only works in main thread' error
-    by running the Flet app in a completely separate process.
-    """
-    # Get the path to the quick_add_standalone script
-    script_dir = Path(__file__).parent.parent
-    standalone_script = script_dir / "quick_add_standalone.py"
+        # Ensure popup stays on screen
+        from PySide6.QtWidgets import QApplication
 
-    # Write selected text to a temp file to pass to subprocess
-    # (avoids issues with special characters in command line args)
-    temp_file = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-            f.write(selected_text)
-            temp_file = f.name
+        screen = QApplication.primaryScreen().geometry()
+        x = max(screen.x(), min(x, screen.x() + screen.width() - self.width()))
+        y = max(screen.y(), min(y, screen.y() + screen.height() - self.height()))
 
-        # Get the Python executable from the current environment
-        python_exe = sys.executable
+        self.move(x, y)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
-        # Run the subprocess
-        subprocess.Popen(
-            [python_exe, str(standalone_script), temp_file],
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-        )
-    except Exception as e:
-        print(f"Error launching quick add subprocess: {e}")
-        # Clean up temp file if subprocess failed to launch
-        if temp_file and os.path.exists(temp_file):
-            try:
-                os.unlink(temp_file)
-            except:
-                pass
+        # Focus trigger input
+        self.trigger_input.setFocus()
 
-
-def show_quick_add_popup(selected_text: str = ""):
-    """Show the quick add popup window.
-
-    This launches the quick add form in a separate process
-    to avoid threading issues with Flet.
-    """
-    _run_quick_add_subprocess(selected_text)
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle key press events."""
+        # Escape closes the popup
+        if event.key() == Qt.Key.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)

@@ -142,7 +142,7 @@ class Settings:
     github_repo: str | None = None
     github_token: str | None = None
     auto_sync: bool = True
-    sync_interval: int = 300  # seconds
+    sync_interval: int = 10800  # seconds (3 hours)
 
     # UI Preferences
     default_prefix: str = ":"
@@ -190,7 +190,7 @@ class Settings:
             github_repo=data.get("github_repo"),
             github_token=data.get("github_token"),
             auto_sync=data.get("auto_sync", True),
-            sync_interval=data.get("sync_interval", 300),
+            sync_interval=data.get("sync_interval", 10800),
             default_prefix=data.get("default_prefix", ":"),
             theme=data.get("theme", "system"),
             custom_colors=data.get("custom_colors", {}),

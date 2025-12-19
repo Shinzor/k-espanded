@@ -1,331 +1,425 @@
-"""Sidebar component with entry list and tag filtering."""
+"""Sidebar with search, view tabs, and scrollable entry list."""
 
-import flet as ft
-from typing import Callable
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QScrollArea,
+    QFrame,
+    QPushButton,
+    QLabel,
+    QMenu,
+)
+from PySide6.QtCore import Qt, Signal
 
-from espanded.core.app_state import get_app_state
 from espanded.ui.theme import ThemeManager
+from espanded.ui.components.search_bar import SearchBar
+from espanded.ui.components.view_tabs import ViewTabs
+from espanded.ui.components.entry_item import EntryItem
+from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
 
 
-class Sidebar(ft.Container):
-    """Sidebar with search, tag filter, and entry list."""
+class Sidebar(QWidget):
+    """Sidebar with search, tabs, and entry list."""
 
-    def __init__(
-        self,
-        theme: ThemeManager,
-        on_entry_selected: Callable[[Entry], None],
-        on_add_entry: Callable[[], None],
-    ):
-        super().__init__()
-        self.theme = theme
-        self.on_entry_selected = on_entry_selected
-        self.on_add_entry = on_add_entry
+    # Signals
+    entry_selected = Signal(object)  # Emits Entry object
+    entry_double_clicked = Signal(object)  # Emits Entry object
+    add_entry_clicked = Signal()
+
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.theme_manager = theme_manager
         self.app_state = get_app_state()
 
-        self.selected_entry_id: str | None = None
-        self.entries: list[Entry] = []
-        self.filtered_entries: list[Entry] = []
-        self.selected_tags: set[str] = set()
-        self.search_query: str = ""
-        self.all_tags: dict[str, int] = {}
-        self._mounted = False
+        # State
+        self._current_view = "all"
+        self._search_query = ""
+        self._selected_tag: str | None = None
+        self._selected_entry_id: str | None = None
+        self._entry_widgets: dict[str, EntryItem] = {}
 
-        self._build()
+        # Set fixed width
+        self.setFixedWidth(280)
 
-    def _build(self):
-        """Build the sidebar layout."""
-        colors = self.theme.colors
-
-        # Search field
-        self.search_field = ft.TextField(
-            hint_text="Search entries...",
-            prefix_icon=ft.Icons.SEARCH,
-            border_radius=8,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_muted,
-            focused_border_color=colors.primary,
-            text_style=ft.TextStyle(color=colors.text_primary),
-            hint_style=ft.TextStyle(color=colors.text_tertiary),
-            on_change=self._on_search_change,
-            height=42,
-        )
-
-        # Tag filter label
-        self.tag_label = ft.Text("Tags: All", color=colors.text_secondary, size=13)
-
-        # Tag filter dropdown
-        self.tag_dropdown = ft.PopupMenuButton(
-            content=ft.Container(
-                content=ft.Row(
-                    controls=[
-                        ft.Icon(ft.Icons.LABEL_OUTLINED, size=16, color=colors.text_secondary),
-                        self.tag_label,
-                        ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=16, color=colors.text_secondary),
-                    ],
-                    spacing=4,
-                ),
-                padding=ft.padding.symmetric(horizontal=12, vertical=8),
-                border_radius=8,
-                bgcolor=colors.bg_surface,
-                border=ft.border.all(1, colors.border_muted),
-            ),
-            items=[],
-        )
-
-        # Entry list
-        self.entry_list = ft.ListView(
-            spacing=2,
-            padding=ft.padding.only(top=8),
-            expand=True,
-        )
-
-        # Build content
-        self.content = ft.Column(
-            controls=[
-                # Search bar
-                ft.Container(
-                    content=self.search_field,
-                    padding=ft.padding.only(left=12, right=12, top=12, bottom=8),
-                ),
-                # Tag filter
-                ft.Container(
-                    content=self.tag_dropdown,
-                    padding=ft.padding.only(left=12, right=12, bottom=8),
-                ),
-                # Divider
-                ft.Divider(height=1, color=colors.border_muted),
-                # Entry list (includes Add Entry button at top)
-                ft.Container(
-                    content=self.entry_list,
-                    expand=True,
-                    padding=ft.padding.symmetric(horizontal=8),
-                ),
-            ],
-            spacing=0,
-            expand=True,
-        )
-
-        self.expand = True
-
-    def did_mount(self):
-        """Called when control is added to page - safe to load data."""
-        self._mounted = True
+        self._setup_ui()
         self._load_entries()
 
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
+        # Register for entry changes
+        self.app_state.entry_manager.add_change_listener(self._on_entries_changed)
+
+    def _setup_ui(self):
+        """Build the sidebar layout."""
+        colors = self.theme_manager.colors
+
+        # Set background and border
+        self.setStyleSheet(
+            f"""
+            QWidget {{
+                background-color: {colors.bg_sidebar};
+            }}
+            QFrame#sidebar_frame {{
+                background-color: {colors.bg_sidebar};
+                border-right: 1px solid {colors.border_muted};
+            }}
+        """
+        )
+
+        # Main frame (to handle border)
+        frame = QFrame()
+        frame.setObjectName("sidebar_frame")
+        frame_layout = QVBoxLayout(frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setSpacing(0)
+
+        # Content layout
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(12, 12, 12, 12)
+        content_layout.setSpacing(8)
+
+        # Search bar
+        self.search_bar = SearchBar(self.theme_manager)
+        self.search_bar.search_changed.connect(self._on_search_changed)
+        content_layout.addWidget(self.search_bar)
+
+        # View tabs
+        self.view_tabs = ViewTabs(self.theme_manager)
+        self.view_tabs.view_changed.connect(self._on_view_changed)
+        self.view_tabs.tag_selected.connect(self._on_tag_selected)
+        content_layout.addWidget(self.view_tabs)
+
+        # Scrollable entry list
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet(
+            f"""
+            QScrollArea {{
+                background-color: {colors.bg_sidebar};
+                border: none;
+            }}
+        """
+        )
+
+        # Entry list container
+        self.entry_list_widget = QWidget()
+        self.entry_list_layout = QVBoxLayout(self.entry_list_widget)
+        self.entry_list_layout.setContentsMargins(0, 8, 0, 8)
+        self.entry_list_layout.setSpacing(2)
+        self.entry_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        scroll_area.setWidget(self.entry_list_widget)
+        content_layout.addWidget(scroll_area, stretch=1)
+
+        # Add Entry button (fixed at bottom)
+        self.add_button = QPushButton("+ Add Entry")
+        self.add_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_button.clicked.connect(self.add_entry_clicked.emit)
+        self.add_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """
+        )
+        content_layout.addWidget(self.add_button)
+
+        frame_layout.addLayout(content_layout)
+
+        # Set frame as the main widget
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(frame)
 
     def _load_entries(self):
-        """Load entries from database."""
-        self.entries = self.app_state.entry_manager.get_all_entries()
-        self.all_tags = self.app_state.entry_manager.get_all_tags()
-        self._update_tag_menu()
-        self._apply_filters()
-
-    def _update_tag_menu(self):
-        """Update the tag filter menu items."""
-        items = [
-            ft.PopupMenuItem(
-                text="All",
-                on_click=lambda e: self._on_clear_tags(),
-            ),
-        ]
-
-        if self.all_tags:
-            items.append(ft.PopupMenuItem())  # Divider
-
-            for tag, count in sorted(self.all_tags.items()):
-                items.append(
-                    ft.PopupMenuItem(
-                        text=f"{tag} ({count})",
-                        checked=tag in self.selected_tags,
-                        on_click=lambda e, t=tag: self._on_tag_toggle(t),
-                    )
+        """Load entries from entry manager based on current filters."""
+        # Get entries based on current view
+        if self._current_view == "all":
+            entries = self.app_state.entry_manager.get_all_entries()
+        elif self._current_view == "favorites":
+            # TODO: Implement favorites filtering when Entry model supports it
+            entries = [
+                e
+                for e in self.app_state.entry_manager.get_all_entries()
+                if hasattr(e, "favorited") and e.favorited
+            ]
+        elif self._current_view == "tags":
+            if self._selected_tag:
+                entries = self.app_state.entry_manager.search_entries(
+                    query="", tags=[self._selected_tag]
                 )
+            else:
+                # Show all entries with any tags
+                entries = [e for e in self.app_state.entry_manager.get_all_entries() if e.tags]
+        elif self._current_view == "trash":
+            entries = self.app_state.entry_manager.get_deleted_entries()
+        else:
+            entries = []
 
-        self.tag_dropdown.items = items
+        # Apply search filter
+        if self._search_query:
+            entries = [
+                e
+                for e in entries
+                if self._search_query.lower() in e.trigger.lower()
+                or self._search_query.lower() in e.replacement.lower()
+            ]
 
-    def _build_entry_item(self, entry: Entry) -> ft.Container:
-        """Build a single entry list item."""
-        colors = self.theme.colors
-        is_selected = entry.id == self.selected_entry_id
+        # Update tag dropdown with available tags
+        all_tags = self.app_state.entry_manager.get_all_tags()
+        self.view_tabs.set_available_tags(all_tags)
 
-        trigger_text = f"{entry.prefix}{entry.trigger}" if entry.prefix else entry.trigger
-        preview = entry.replacement[:50].replace("\n", " ")
-        if len(entry.replacement) > 50:
-            preview += "..."
+        # Refresh the list display
+        self._refresh_entry_list(entries)
 
-        # Tag chips (show first 2)
-        tag_chips = []
-        for tag in entry.tags[:2]:
-            tag_chips.append(
-                ft.Container(
-                    content=ft.Text(tag, size=10, color=colors.tag_text),
-                    bgcolor=colors.tag_bg,
-                    padding=ft.padding.symmetric(horizontal=6, vertical=2),
-                    border_radius=10,
-                )
-            )
-        if len(entry.tags) > 2:
-            tag_chips.append(
-                ft.Text(f"+{len(entry.tags) - 2}", size=10, color=colors.text_tertiary)
-            )
+    def _refresh_entry_list(self, entries: list[Entry]):
+        """Refresh the entry list display with given entries."""
+        # Clear existing widgets
+        for widget in self._entry_widgets.values():
+            widget.deleteLater()
+        self._entry_widgets.clear()
 
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Text(
-                                trigger_text,
-                                weight=ft.FontWeight.W_500,
-                                color=colors.primary if is_selected else colors.text_primary,
-                                size=14,
-                                expand=True,
-                            ),
-                            *tag_chips,
-                        ],
-                        spacing=4,
-                    ),
-                    ft.Text(
-                        preview,
-                        color=colors.text_secondary,
-                        size=12,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                ],
-                spacing=4,
-            ),
-            padding=ft.padding.symmetric(horizontal=12, vertical=10),
-            border_radius=8,
-            bgcolor=colors.entry_selected if is_selected else None,
-            on_hover=lambda e: self._on_entry_hover(e, entry),
-            on_click=lambda e: self._on_entry_click(entry),
-            data=entry.id,
+        # Clear layout
+        while self.entry_list_layout.count():
+            child = self.entry_list_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Show empty state if no entries
+        if not entries:
+            self._show_empty_state()
+            return
+
+        # Create entry widgets
+        for entry in entries:
+            entry_widget = EntryItem(entry, self.theme_manager)
+            entry_widget.clicked.connect(self._on_entry_clicked)
+            entry_widget.double_clicked.connect(self._on_entry_double_clicked)
+            entry_widget.context_menu_requested.connect(self._on_entry_context_menu)
+
+            # Set selection state
+            if entry.id == self._selected_entry_id:
+                entry_widget.set_selected(True)
+
+            self.entry_list_layout.addWidget(entry_widget)
+            self._entry_widgets[entry.id] = entry_widget
+
+    def _show_empty_state(self):
+        """Show empty state message."""
+        colors = self.theme_manager.colors
+
+        # Determine message based on view
+        if self._search_query or self._selected_tag:
+            message = "No entries found"
+            icon = "\u1F50D"  # Magnifying glass
+        elif self._current_view == "trash":
+            message = "Trash is empty"
+            icon = "\u1F5D1"  # Trash can
+        elif self._current_view == "favorites":
+            message = "No favorites yet"
+            icon = "\u2606"  # Empty star
+        elif self._current_view == "tags":
+            message = "No tagged entries"
+            icon = "\u23F7"  # Label
+        else:
+            message = "No entries yet"
+            icon = "\u1F4DD"  # Memo
+
+        # Icon label
+        icon_label = QLabel(icon)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet(
+            f"""
+            QLabel {{
+                font-size: 48px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+                padding: 20px;
+            }}
+        """
         )
+        self.entry_list_layout.addWidget(icon_label)
 
-    def _apply_filters(self):
-        """Apply search and tag filters to entries."""
-        # Use entry manager's search if we have a query
-        if self.search_query or self.selected_tags:
-            self.filtered_entries = self.app_state.entry_manager.search_entries(
-                query=self.search_query,
-                tags=list(self.selected_tags) if self.selected_tags else None,
-            )
-        else:
-            self.filtered_entries = self.entries.copy()
-
-        self._refresh_list()
-
-    def _build_add_entry_button(self) -> ft.Container:
-        """Build the Add Entry button for the entry list."""
-        colors = self.theme.colors
-
-        return ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.ADD, size=18, color=colors.text_inverse),
-                    ft.Text("Add Entry", size=14, color=colors.text_inverse, weight=ft.FontWeight.W_500),
-                ],
-                spacing=8,
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            bgcolor=colors.primary,
-            padding=ft.padding.symmetric(vertical=10),
-            border_radius=8,
-            on_click=lambda e: self.on_add_entry(),
-            ink=True,
-            margin=ft.margin.only(bottom=8),
+        # Message label
+        msg_label = QLabel(message)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg_label.setWordWrap(True)
+        msg_label.setStyleSheet(
+            f"""
+            QLabel {{
+                font-size: 14px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+                padding: 0px 20px 20px 20px;
+            }}
+        """
         )
+        self.entry_list_layout.addWidget(msg_label)
 
-    def _refresh_list(self):
-        """Refresh the entry list display."""
-        self.entry_list.controls.clear()
+    def _on_search_changed(self, text: str):
+        """Handle search query change."""
+        self._search_query = text
+        self._load_entries()
 
-        # Always add the Add Entry button at the top
-        self.entry_list.controls.append(self._build_add_entry_button())
+    def _on_view_changed(self, view: str):
+        """Handle view tab change."""
+        self._current_view = view
+        self._selected_tag = None  # Clear tag filter when changing views
+        self._load_entries()
 
-        if not self.filtered_entries:
-            colors = self.theme.colors
-            self.entry_list.controls.append(
-                ft.Container(
-                    content=ft.Column(
-                        controls=[
-                            ft.Icon(ft.Icons.INBOX_OUTLINED, size=48, color=colors.text_tertiary),
-                            ft.Text(
-                                "No entries found" if self.search_query or self.selected_tags else "No entries yet",
-                                color=colors.text_tertiary,
-                                size=14,
-                            ),
-                        ],
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=8,
-                    ),
-                    padding=40,
-                    alignment=ft.alignment.center,
-                )
-            )
-        else:
-            for entry in self.filtered_entries:
-                self.entry_list.controls.append(self._build_entry_item(entry))
+    def _on_tag_selected(self, tag: str):
+        """Handle specific tag selection."""
+        self._selected_tag = tag
+        self._current_view = "tags"
+        self._load_entries()
 
-        # Only update if mounted
-        if self._mounted:
-            self.update()
-
-    def _on_search_change(self, e):
-        """Handle search text change."""
-        self.search_query = e.control.value
-        self._apply_filters()
-
-    def _on_clear_tags(self):
-        """Clear all tag filters."""
-        self.selected_tags.clear()
-        self.tag_label.value = "Tags: All"
-        self._update_tag_menu()
-        self._apply_filters()
-
-    def _on_tag_toggle(self, tag: str):
-        """Toggle a tag in the filter."""
-        if tag in self.selected_tags:
-            self.selected_tags.remove(tag)
-        else:
-            self.selected_tags.add(tag)
-
-        # Update label
-        if not self.selected_tags:
-            self.tag_label.value = "Tags: All"
-        elif len(self.selected_tags) == 1:
-            self.tag_label.value = f"Tag: {list(self.selected_tags)[0]}"
-        else:
-            self.tag_label.value = f"Tags: {len(self.selected_tags)} selected"
-
-        self._update_tag_menu()
-        self._apply_filters()
-
-    def _on_entry_hover(self, e, entry: Entry):
-        """Handle entry hover effect."""
-        colors = self.theme.colors
-        if entry.id != self.selected_entry_id:
-            # e.data is "true" when mouse enters, "false" when it leaves
-            is_hovering = e.data == "true"
-            e.control.bgcolor = colors.entry_hover if is_hovering else None
-            e.control.update()
-
-    def _on_entry_click(self, entry: Entry):
+    def _on_entry_clicked(self, entry_id: str):
         """Handle entry click."""
-        self.selected_entry_id = entry.id
-        self._refresh_list()
-        self.on_entry_selected(entry)
+        # Update selection
+        old_selected = self._selected_entry_id
+        self._selected_entry_id = entry_id
 
-    def clear_selection(self):
-        """Clear the current selection."""
-        self.selected_entry_id = None
-        self._refresh_list()
+        # Update widget states
+        if old_selected and old_selected in self._entry_widgets:
+            self._entry_widgets[old_selected].set_selected(False)
+
+        if entry_id in self._entry_widgets:
+            self._entry_widgets[entry_id].set_selected(True)
+
+        # Emit signal with full entry object
+        entry = self.app_state.entry_manager.get_entry(entry_id)
+        if entry:
+            self.entry_selected.emit(entry)
+
+    def _on_entry_double_clicked(self, entry_id: str):
+        """Handle entry double-click."""
+        entry = self.app_state.entry_manager.get_entry(entry_id)
+        if entry:
+            self.entry_double_clicked.emit(entry)
+
+    def _on_entry_context_menu(self, entry_id: str, pos):
+        """Handle entry right-click context menu."""
+        entry = self.app_state.entry_manager.get_entry(entry_id)
+        if not entry:
+            return
+
+        colors = self.theme_manager.colors
+
+        # Create context menu
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            f"""
+            QMenu {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 8px 16px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {colors.entry_selected};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {colors.border_muted};
+                margin: 4px 0px;
+            }}
+        """
+        )
+
+        # Menu actions
+        if self._current_view == "trash":
+            # Trash view actions
+            restore_action = menu.addAction("\u21BA Restore")
+            restore_action.triggered.connect(lambda: self._restore_entry(entry_id))
+
+            delete_action = menu.addAction("\u2715 Delete Permanently")
+            delete_action.triggered.connect(lambda: self._permanent_delete_entry(entry_id))
+        else:
+            # Normal view actions
+            edit_action = menu.addAction("\u270E Edit")
+            edit_action.triggered.connect(lambda: self._edit_entry(entry_id))
+
+            duplicate_action = menu.addAction("\u2398 Duplicate")
+            duplicate_action.triggered.connect(lambda: self._duplicate_entry(entry_id))
+
+            menu.addSeparator()
+
+            # TODO: Implement toggle favorite when Entry model supports it
+            favorite_action = menu.addAction("\u2605 Toggle Favorite")
+            favorite_action.triggered.connect(lambda: self._toggle_favorite(entry_id))
+
+            menu.addSeparator()
+
+            delete_action = menu.addAction("\u1F5D1 Delete")
+            delete_action.triggered.connect(lambda: self._delete_entry(entry_id))
+
+        # Show menu
+        menu.exec(pos)
+
+    def _edit_entry(self, entry_id: str):
+        """Edit entry (emit double-click signal)."""
+        entry = self.app_state.entry_manager.get_entry(entry_id)
+        if entry:
+            self.entry_double_clicked.emit(entry)
+
+    def _duplicate_entry(self, entry_id: str):
+        """Duplicate entry."""
+        self.app_state.entry_manager.clone_entry(entry_id)
+        # Entries will auto-refresh via change listener
+
+    def _toggle_favorite(self, entry_id: str):
+        """Toggle entry favorite status."""
+        # TODO: Implement when Entry model supports favorited field
+        pass
+
+    def _delete_entry(self, entry_id: str):
+        """Delete entry (move to trash)."""
+        self.app_state.entry_manager.delete_entry(entry_id)
+        # Entries will auto-refresh via change listener
+
+    def _restore_entry(self, entry_id: str):
+        """Restore entry from trash."""
+        self.app_state.entry_manager.restore_entry(entry_id)
+        # Entries will auto-refresh via change listener
+
+    def _permanent_delete_entry(self, entry_id: str):
+        """Permanently delete entry."""
+        # TODO: Add confirmation dialog
+        self.app_state.entry_manager.permanent_delete(entry_id)
+        # Entries will auto-refresh via change listener
+
+    def _on_entries_changed(self):
+        """Handle entry manager change notification."""
+        self._load_entries()
 
     def refresh_entries(self):
-        """Refresh entries from data source."""
+        """Refresh entry list (public method)."""
         self._load_entries()
+
+    def clear_selection(self):
+        """Clear the current entry selection."""
+        if self._selected_entry_id and self._selected_entry_id in self._entry_widgets:
+            self._entry_widgets[self._selected_entry_id].set_selected(False)
+        self._selected_entry_id = None
+
+    def get_selected_entry(self) -> Entry | None:
+        """Get the currently selected entry."""
+        if self._selected_entry_id:
+            return self.app_state.entry_manager.get_entry(self._selected_entry_id)
+        return None

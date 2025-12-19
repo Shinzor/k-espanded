@@ -1,140 +1,217 @@
-"""Trash view component showing deleted entries with restore functionality."""
+"""Trash view showing deleted entries with restore functionality."""
 
-import flet as ft
 from datetime import datetime
-from typing import Callable
 
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QFrame,
+    QScrollArea,
+    QMessageBox,
+)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
+
+from espanded.ui.theme import ThemeManager
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
-from espanded.ui.theme import ThemeManager
 
 
-class TrashView(ft.Container):
+class TrashView(QWidget):
     """Trash view showing deleted entries with restore and permanent delete."""
 
-    def __init__(self, theme: ThemeManager, on_close: Callable[[], None]):
-        super().__init__()
-        self.theme = theme
-        self.on_close = on_close
+    # Signals
+    close_requested = Signal()
+    entry_restored = Signal(str)  # Emits entry_id
+
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.theme_manager = theme_manager
         self.app_state = get_app_state()
 
         # State
         self.search_query = ""
-        self._mounted = False
 
-        self._build()
+        self._setup_ui()
 
-    def _build(self):
+    def _setup_ui(self):
         """Build the trash view layout."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Header
-        self.trash_count = ft.Text(
-            "",
-            size=14,
-            color=colors.text_secondary,
-        )
+        header = self._create_header()
+        layout.addWidget(header)
 
-        header = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Icon(ft.Icons.DELETE_OUTLINE, size=24, color=colors.primary),
-                            ft.Text(
-                                "Trash",
-                                size=20,
-                                weight=ft.FontWeight.W_600,
-                                color=colors.text_primary,
-                            ),
-                            self.trash_count,
-                        ],
-                        spacing=12,
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_color=colors.text_secondary,
-                        on_click=lambda e: self.on_close(),
-                        tooltip="Close",
-                    ),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
+        # Toolbar (search and empty trash button)
+        toolbar = self._create_toolbar()
+        layout.addWidget(toolbar)
 
-        # Search bar and empty trash button
-        self.search_field = ft.TextField(
-            label="Search",
-            hint_text="Search deleted entries...",
-            expand=True,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            on_change=self._on_search_change,
-        )
+        # Scrollable trash list
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {colors.bg_base};
+                border: none;
+            }}
+        """)
 
-        self.empty_trash_button = ft.ElevatedButton(
-            text="Empty Trash",
-            icon=ft.Icons.DELETE_FOREVER,
-            bgcolor=colors.error,
-            color=colors.text_inverse,
-            on_click=self._on_empty_trash,
-        )
+        self.trash_container = QWidget()
+        self.trash_layout = QVBoxLayout(self.trash_container)
+        self.trash_layout.setContentsMargins(20, 16, 20, 20)
+        self.trash_layout.setSpacing(8)
+        self.trash_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        toolbar = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.search_field,
-                    self.empty_trash_button,
-                ],
-                spacing=12,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
+        scroll.setWidget(self.trash_container)
+        layout.addWidget(scroll, stretch=1)
 
-        # Trash list
-        self.trash_list = ft.Column(
-            controls=[],
-            spacing=8,
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-        )
+    def _create_header(self) -> QWidget:
+        """Create trash header."""
+        colors = self.theme_manager.colors
 
-        # Layout
-        self.content = ft.Column(
-            controls=[
-                header,
-                toolbar,
-                ft.Container(
-                    content=self.trash_list,
-                    expand=True,
-                ),
-            ],
-            spacing=0,
-            expand=True,
-        )
+        header = QWidget()
+        header.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+            }}
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 20, 20, 16)
 
-        self.expand = True
-        self.padding = 20
+        # Icon, title, and count
+        title_row = QWidget()
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(12)
 
-    def did_mount(self):
-        """Called when control is added to page - safe to load data."""
-        self._mounted = True
-        self._refresh_trash()
+        icon_label = QLabel("\u1F5D1")  # Trash emoji
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 24px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(icon_label)
 
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
+        title = QLabel("Trash")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(title)
 
-    def _on_search_change(self, e):
+        self.trash_count = QLabel("")
+        self.trash_count.setStyleSheet(f"""
+            QLabel {{
+                font-size: 14px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(self.trash_count)
+
+        header_layout.addWidget(title_row)
+        header_layout.addStretch()
+
+        # Close button
+        close_btn = QPushButton("\u2715")
+        close_btn.setFixedSize(32, 32)
+        close_btn.clicked.connect(self.close_requested.emit)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_elevated};
+            }}
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(close_btn)
+
+        return header
+
+    def _create_toolbar(self) -> QWidget:
+        """Create search and empty trash toolbar."""
+        colors = self.theme_manager.colors
+
+        toolbar = QWidget()
+        toolbar.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+                border-bottom: 1px solid {colors.border_muted};
+            }}
+        """)
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(20, 0, 20, 16)
+        toolbar_layout.setSpacing(12)
+
+        # Search field
+        self.search_field = QLineEdit()
+        self.search_field.setPlaceholderText("Search deleted entries...")
+        self.search_field.textChanged.connect(self._on_search_change)
+        toolbar_layout.addWidget(self.search_field, stretch=1)
+
+        # Empty trash button
+        self.empty_trash_button = QPushButton("\u1F5D1 Empty Trash")
+        self.empty_trash_button.clicked.connect(self._on_empty_trash)
+        self.empty_trash_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.error};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                opacity: 0.9;
+            }}
+            QPushButton:disabled {{
+                background-color: {colors.border_muted};
+                color: {colors.text_tertiary};
+            }}
+        """)
+        self.empty_trash_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        toolbar_layout.addWidget(self.empty_trash_button)
+
+        return toolbar
+
+    def _on_search_change(self, text: str):
         """Handle search field change."""
-        self.search_query = e.control.value.lower()
+        self.search_query = text.lower()
         self._refresh_trash()
 
     def _refresh_trash(self):
         """Refresh the trash list."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
+
+        # Clear existing items
+        while self.trash_layout.count():
+            child = self.trash_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
         # Get deleted entries
         all_deleted = self.app_state.entry_manager.get_deleted_entries()
@@ -149,56 +226,24 @@ class TrashView(ft.Container):
 
         # Update count
         count = len(all_deleted)
-        self.trash_count.value = f"({count} item{'s' if count != 1 else ''})"
+        self.trash_count.setText(f"({count} item{'s' if count != 1 else ''})")
 
-        # Update empty trash button visibility
-        self.empty_trash_button.disabled = count == 0
-
-        # Build list
-        self.trash_list.controls.clear()
+        # Update empty trash button state
+        self.empty_trash_button.setEnabled(count > 0)
 
         if not all_deleted:
             # Empty state
-            self.trash_list.controls.append(
-                ft.Container(
-                    content=ft.Column(
-                        controls=[
-                            ft.Icon(
-                                ft.Icons.DELETE_OUTLINE,
-                                size=64,
-                                color=colors.text_tertiary,
-                            ),
-                            ft.Text(
-                                "Trash is empty",
-                                size=16,
-                                color=colors.text_secondary,
-                            ),
-                            ft.Text(
-                                "Deleted entries will appear here",
-                                size=12,
-                                color=colors.text_tertiary,
-                            ),
-                        ],
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=8,
-                    ),
-                    alignment=ft.alignment.center,
-                    expand=True,
-                )
-            )
-        else:
-            for entry in all_deleted:
-                self.trash_list.controls.append(
-                    self._build_trash_item(entry)
-                )
+            self._show_empty_state()
+            return
 
-        # Only update if mounted
-        if self._mounted:
-            self.update()
+        # Build list
+        for entry in all_deleted:
+            item = self._build_trash_item(entry)
+            self.trash_layout.addWidget(item)
 
-    def _build_trash_item(self, entry: Entry) -> ft.Container:
+    def _build_trash_item(self, entry: Entry) -> QFrame:
         """Build a single trash item."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
 
         # Format deleted date
         if entry.deleted_at:
@@ -211,253 +256,238 @@ class TrashView(ft.Container):
         if len(preview) > 80:
             preview = preview[:80] + "..."
 
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    # Header with trigger and deleted date
-                    ft.Row(
-                        controls=[
-                            ft.Text(
-                                entry.full_trigger,
-                                size=15,
-                                weight=ft.FontWeight.W_600,
-                                color=colors.text_primary,
-                            ),
-                            ft.Text(
-                                f"Deleted: {deleted_str}",
-                                size=12,
-                                color=colors.text_tertiary,
-                            ),
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    ),
-                    # Replacement preview
-                    ft.Container(
-                        content=ft.Text(
-                            preview,
-                            size=13,
-                            color=colors.text_secondary,
-                            max_lines=2,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        margin=ft.margin.only(top=4, bottom=12),
-                    ),
-                    # Tags (if any)
-                    ft.Row(
-                        controls=[
-                            ft.Container(
-                                content=ft.Text(
-                                    tag,
-                                    size=11,
-                                    color=colors.tag_text,
-                                ),
-                                bgcolor=colors.tag_bg,
-                                border_radius=4,
-                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                            )
-                            for tag in entry.tags
-                        ],
-                        spacing=4,
-                        wrap=True,
-                    ) if entry.tags else ft.Container(),
-                    # Action buttons
-                    ft.Row(
-                        controls=[
-                            ft.ElevatedButton(
-                                text="Restore",
-                                icon=ft.Icons.RESTORE,
-                                bgcolor=colors.success,
-                                color=colors.text_inverse,
-                                on_click=lambda e, entry_id=entry.id: self._restore_entry(entry_id),
-                            ),
-                            ft.ElevatedButton(
-                                text="Delete Forever",
-                                icon=ft.Icons.DELETE_FOREVER,
-                                bgcolor=colors.error,
-                                color=colors.text_inverse,
-                                on_click=lambda e, entry_id=entry.id, trigger=entry.full_trigger: self._confirm_permanent_delete(entry_id, trigger),
-                            ),
-                        ],
-                        spacing=8,
-                        alignment=ft.MainAxisAlignment.END,
-                    ),
-                ],
-                spacing=0,
-            ),
-            padding=20,
-            border_radius=12,
-            bgcolor=colors.bg_surface,
-            border=ft.border.all(1, colors.border_muted),
-        )
+        # Build item
+        item = QFrame()
+        item.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border: 1px solid {colors.border_muted};
+                border-radius: 12px;
+            }}
+        """)
+        item_layout = QVBoxLayout(item)
+        item_layout.setContentsMargins(20, 20, 20, 20)
+        item_layout.setSpacing(0)
+
+        # Header row: trigger and deleted date
+        header_row = QWidget()
+        header_layout = QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        trigger_label = QLabel(entry.full_trigger)
+        trigger_font = QFont()
+        trigger_font.setPointSize(12)
+        trigger_font.setBold(True)
+        trigger_label.setFont(trigger_font)
+        trigger_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(trigger_label)
+        header_layout.addStretch()
+
+        deleted_label = QLabel(f"Deleted: {deleted_str}")
+        deleted_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(deleted_label)
+
+        item_layout.addWidget(header_row)
+
+        # Replacement preview
+        if preview:
+            preview_label = QLabel(preview)
+            preview_label.setWordWrap(True)
+            preview_label.setStyleSheet(f"""
+                QLabel {{
+                    font-size: 13px;
+                    color: {colors.text_secondary};
+                    background-color: transparent;
+                    margin-top: 4px;
+                    margin-bottom: 12px;
+                }}
+            """)
+            item_layout.addWidget(preview_label)
+
+        # Tags (if any)
+        if entry.tags:
+            tags_row = QWidget()
+            tags_layout = QHBoxLayout(tags_row)
+            tags_layout.setContentsMargins(0, 0, 0, 12)
+            tags_layout.setSpacing(4)
+
+            for tag in entry.tags:
+                tag_chip = QLabel(tag)
+                tag_chip.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {colors.tag_bg};
+                        color: {colors.tag_text};
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        font-size: 11px;
+                    }}
+                """)
+                tags_layout.addWidget(tag_chip)
+
+            tags_layout.addStretch()
+            item_layout.addWidget(tags_row)
+
+        # Action buttons
+        button_row = QWidget()
+        button_layout = QHBoxLayout(button_row)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(8)
+        button_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        restore_btn = QPushButton("\u21BA Restore")
+        restore_btn.clicked.connect(lambda: self._restore_entry(entry.id))
+        restore_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.success};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                opacity: 0.9;
+            }}
+        """)
+        restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_layout.addWidget(restore_btn)
+
+        delete_btn = QPushButton("\u2716 Delete Forever")
+        delete_btn.clicked.connect(lambda: self._confirm_permanent_delete(entry.id, entry.full_trigger))
+        delete_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.error};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                opacity: 0.9;
+            }}
+        """)
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_layout.addWidget(delete_btn)
+
+        item_layout.addWidget(button_row)
+
+        return item
+
+    def _show_empty_state(self):
+        """Show empty state message."""
+        colors = self.theme_manager.colors
+
+        empty = QWidget()
+        empty_layout = QVBoxLayout(empty)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.setSpacing(8)
+
+        icon_label = QLabel("\u1F5D1")
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 64px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(icon_label)
+
+        msg_label = QLabel("Trash is empty")
+        msg_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 16px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(msg_label)
+
+        desc_label = QLabel("Deleted entries will appear here")
+        desc_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(desc_label)
+
+        self.trash_layout.addWidget(empty)
 
     def _restore_entry(self, entry_id: str):
         """Restore a deleted entry."""
         entry = self.app_state.entry_manager.get_entry(entry_id)
         if not entry:
-            self._show_snackbar("Entry not found", error=True)
+            QMessageBox.warning(self, "Entry Not Found", "Entry not found")
             return
 
         success = self.app_state.entry_manager.restore_entry(entry_id)
 
         if success:
-            self._show_snackbar(f"Restored {entry.full_trigger}")
+            self.entry_restored.emit(entry_id)
             self._refresh_trash()
+            QMessageBox.information(self, "Entry Restored", f"Restored {entry.full_trigger}")
         else:
-            self._show_snackbar("Failed to restore entry", error=True)
+            QMessageBox.warning(self, "Restore Failed", "Failed to restore entry")
 
     def _confirm_permanent_delete(self, entry_id: str, trigger: str):
         """Show confirmation dialog before permanent deletion."""
-        colors = self.theme.colors
-
-        def delete_confirmed(e):
-            dialog.open = False
-            self.page.update()
-            self._permanent_delete_entry(entry_id, trigger)
-
-        def cancel_delete(e):
-            dialog.open = False
-            self.page.update()
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.WARNING_AMBER, color=colors.error),
-                    ft.Text("Confirm Permanent Deletion", color=colors.text_primary),
-                ],
-                spacing=8,
-            ),
-            content=ft.Container(
-                content=ft.Column(
-                    controls=[
-                        ft.Text(
-                            f"Are you sure you want to permanently delete this entry?",
-                            size=14,
-                            color=colors.text_primary,
-                        ),
-                        ft.Container(
-                            content=ft.Text(
-                                trigger,
-                                size=13,
-                                weight=ft.FontWeight.W_600,
-                                color=colors.error,
-                            ),
-                            bgcolor=colors.bg_elevated,
-                            padding=12,
-                            border_radius=8,
-                            margin=ft.margin.only(top=8),
-                        ),
-                        ft.Text(
-                            "This action cannot be undone.",
-                            size=12,
-                            color=colors.warning,
-                            weight=ft.FontWeight.W_500,
-                            italic=True,
-                        ),
-                    ],
-                    spacing=8,
-                ),
-                width=400,
-            ),
-            actions=[
-                ft.TextButton(
-                    "Cancel",
-                    on_click=cancel_delete,
-                ),
-                ft.ElevatedButton(
-                    "Delete Forever",
-                    icon=ft.Icons.DELETE_FOREVER,
-                    bgcolor=colors.error,
-                    color=colors.text_inverse,
-                    on_click=delete_confirmed,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_surface,
+        reply = QMessageBox.question(
+            self,
+            "Confirm Permanent Deletion",
+            f"Are you sure you want to permanently delete '{trigger}'?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
+        if reply == QMessageBox.StandardButton.Yes:
+            self._permanent_delete_entry(entry_id, trigger)
 
     def _permanent_delete_entry(self, entry_id: str, trigger: str):
         """Permanently delete an entry."""
         success = self.app_state.entry_manager.permanent_delete(entry_id)
 
         if success:
-            self._show_snackbar(f"Permanently deleted {trigger}")
             self._refresh_trash()
+            QMessageBox.information(self, "Entry Deleted", f"Permanently deleted {trigger}")
         else:
-            self._show_snackbar("Failed to delete entry", error=True)
+            QMessageBox.warning(self, "Delete Failed", "Failed to delete entry")
 
-    def _on_empty_trash(self, e):
+    def _on_empty_trash(self):
         """Show confirmation dialog before emptying trash."""
-        colors = self.theme.colors
-
         deleted_entries = self.app_state.entry_manager.get_deleted_entries()
         count = len(deleted_entries)
 
         if count == 0:
             return
 
-        def empty_confirmed(e):
-            dialog.open = False
-            self.page.update()
-            self._empty_trash()
-
-        def cancel_empty(e):
-            dialog.open = False
-            self.page.update()
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.WARNING_AMBER, color=colors.error),
-                    ft.Text("Confirm Empty Trash", color=colors.text_primary),
-                ],
-                spacing=8,
-            ),
-            content=ft.Container(
-                content=ft.Column(
-                    controls=[
-                        ft.Text(
-                            f"Are you sure you want to permanently delete all {count} items in the trash?",
-                            size=14,
-                            color=colors.text_primary,
-                        ),
-                        ft.Text(
-                            "This action cannot be undone.",
-                            size=12,
-                            color=colors.warning,
-                            weight=ft.FontWeight.W_500,
-                            italic=True,
-                        ),
-                    ],
-                    spacing=8,
-                ),
-                width=400,
-            ),
-            actions=[
-                ft.TextButton(
-                    "Cancel",
-                    on_click=cancel_empty,
-                ),
-                ft.ElevatedButton(
-                    "Empty Trash",
-                    icon=ft.Icons.DELETE_FOREVER,
-                    bgcolor=colors.error,
-                    color=colors.text_inverse,
-                    on_click=empty_confirmed,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_surface,
+        reply = QMessageBox.question(
+            self,
+            "Confirm Empty Trash",
+            f"Are you sure you want to permanently delete all {count} items in the trash?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
+        if reply == QMessageBox.StandardButton.Yes:
+            self._empty_trash()
 
     def _empty_trash(self):
         """Empty the trash (permanently delete all deleted entries)."""
@@ -468,19 +498,12 @@ class TrashView(ft.Container):
             if self.app_state.entry_manager.permanent_delete(entry.id):
                 count += 1
 
-        self._show_snackbar(f"Permanently deleted {count} item{'s' if count != 1 else ''}")
         self._refresh_trash()
-
-    def _show_snackbar(self, message: str, error: bool = False):
-        """Show a snackbar notification."""
-        colors = self.theme.colors
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(message, color=colors.text_primary),
-            bgcolor=colors.error if error else colors.success,
-            duration=2000,
+        QMessageBox.information(
+            self,
+            "Trash Emptied",
+            f"Permanently deleted {count} item{'s' if count != 1 else ''}",
         )
-        self.page.snack_bar.open = True
-        self.page.update()
 
     def refresh(self):
         """Refresh the trash view."""

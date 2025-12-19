@@ -170,12 +170,13 @@ class HotkeyService:
             self._show_quick_add_popup(selected_text)
 
     def _show_quick_add_popup(self, selected_text: str):
-        """Show the quick add popup with the selected text."""
-        try:
-            from espanded.ui.quick_add import show_quick_add_popup
-            show_quick_add_popup(selected_text)
-        except Exception as e:
-            print(f"Error showing quick add popup: {e}")
+        """Show the quick add popup with the selected text.
+
+        This method should not be called directly - the UI framework
+        should set a callback via set_callbacks().
+        """
+        print(f"Quick add triggered with selected text: {selected_text[:50]}...")
+        print("Note: Quick add popup requires a callback to be set via set_callbacks()")
 
 
 # Singleton instance

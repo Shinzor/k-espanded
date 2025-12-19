@@ -1,992 +1,725 @@
-"""Settings view component for application preferences."""
+"""Settings view for application preferences."""
 
-import flet as ft
 from pathlib import Path
-from typing import Callable
 
-from espanded.core.app_state import get_app_state
-from espanded.core.espanso_config import (
-    EspansoConfig,
-    EspansoConfigHandler,
-    TOGGLE_KEY_OPTIONS,
-    BACKEND_OPTIONS,
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QCheckBox,
+    QComboBox,
+    QRadioButton,
+    QButtonGroup,
+    QFrame,
+    QScrollArea,
+    QFileDialog,
+    QMessageBox,
 )
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
+
 from espanded.ui.theme import ThemeManager
 from espanded.ui.components.hotkey_recorder import HotkeyRecorder
+from espanded.core.app_state import get_app_state
+from espanded.core.models import Settings
 
 
-class SettingsView(ft.Container):
+class SettingsView(QWidget):
     """Settings view for managing application preferences."""
 
-    def __init__(self, theme: ThemeManager, on_close: Callable[[], None], on_theme_change: Callable[[], None] | None = None):
-        super().__init__()
-        self.theme = theme
-        self.on_close = on_close
-        self.on_theme_change = on_theme_change
+    # Signals
+    close_requested = Signal()
+    theme_changed = Signal()
+    settings_saved = Signal()
+
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.theme_manager = theme_manager
         self.app_state = get_app_state()
 
         # Local state for form fields
         self.settings = self.app_state.settings
-        self._mounted = False
 
-        # Espanso config
-        self.espanso_config: EspansoConfig | None = None
-        self._load_espanso_config()
+        self._setup_ui()
 
-        # File picker for browse functionality
-        self.folder_picker = ft.FilePicker(on_result=self._on_folder_picked)
-
-        self._build()
-
-    def _load_espanso_config(self):
-        """Load Espanso configuration from default.yml."""
-        if self.settings.espanso_config_path:
-            try:
-                handler = EspansoConfigHandler(self.settings.espanso_config_path)
-                if handler.exists():
-                    self.espanso_config = handler.load()
-                else:
-                    self.espanso_config = EspansoConfig()
-            except Exception:
-                self.espanso_config = EspansoConfig()
-        else:
-            self.espanso_config = EspansoConfig()
-
-    def did_mount(self):
-        """Called when control is added to page."""
-        self._mounted = True
-        if self.page and self.folder_picker not in self.page.overlay:
-            self.page.overlay.append(self.folder_picker)
-            self.page.update()
-
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
-
-    def _on_browse_espanso_path(self, e):
-        """Handle browse button for Espanso path."""
-        if not self.page:
-            return
-        # Ensure folder picker is in overlay
-        if self.folder_picker not in self.page.overlay:
-            self.page.overlay.append(self.folder_picker)
-            self.page.update()
-        self.folder_picker.get_directory_path(dialog_title="Select Espanso Config Directory")
-
-    def _build(self):
+    def _setup_ui(self):
         """Build the settings view layout."""
-        colors = self.theme.colors
+        colors = self.theme_manager.colors
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Header
-        header = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Icon(ft.Icons.SETTINGS, size=24, color=colors.primary),
-                            ft.Text(
-                                "Settings",
-                                size=20,
-                                weight=ft.FontWeight.W_600,
-                                color=colors.text_primary,
-                            ),
-                        ],
-                        spacing=12,
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_color=colors.text_secondary,
-                        on_click=lambda e: self.on_close(),
-                        tooltip="Close",
-                    ),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
+        header = self._create_header()
+        layout.addWidget(header)
 
-        # Action buttons row - fixed at top (like Entry Editor)
-        actions_row = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.TextButton(
-                        text="Reset to Defaults",
-                        on_click=self._on_reset_defaults,
-                    ),
-                    ft.ElevatedButton(
-                        text="Save Settings",
-                        icon=ft.Icons.SAVE,
-                        bgcolor=colors.primary,
-                        color=colors.text_inverse,
-                        on_click=self._on_save,
-                    ),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            padding=ft.padding.only(bottom=16),
-            border=ft.border.only(bottom=ft.BorderSide(1, colors.border_muted)),
-        )
-
-        # Settings sections
-        espanso_section = self._build_espanso_section()
-        espanso_options_section = self._build_espanso_options_section()
-        sync_section = self._build_sync_section()
-        hotkeys_section = self._build_hotkeys_section()
-        appearance_section = self._build_appearance_section()
+        # Action buttons row (fixed at top)
+        actions_row = self._create_action_buttons()
+        layout.addWidget(actions_row)
 
         # Scrollable content
-        scrollable_content = ft.Column(
-            controls=[
-                ft.Container(height=16),  # Top spacing after actions
-                espanso_section,
-                ft.Container(height=16),
-                espanso_options_section,
-                ft.Container(height=16),
-                sync_section,
-                ft.Container(height=16),
-                hotkeys_section,
-                ft.Container(height=16),
-                appearance_section,
-                ft.Container(height=16),  # Bottom padding
-            ],
-            spacing=0,
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {colors.bg_base};
+                border: none;
+            }}
+        """)
 
-        # Main layout with fixed header/actions and scrollable content
-        self.content = ft.Column(
-            controls=[
-                header,
-                actions_row,
-                scrollable_content,
-            ],
-            spacing=0,
-            expand=True,
-        )
-        self.expand = True
-        self.padding = 20
+        content = self._create_content()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, stretch=1)
 
-    def _build_section_header(self, icon, title):
-        """Build a section header."""
-        colors = self.theme.colors
+    def _create_header(self) -> QWidget:
+        """Create settings header."""
+        colors = self.theme_manager.colors
 
-        return ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(icon, size=20, color=colors.primary),
-                    ft.Text(
-                        title,
-                        size=16,
-                        weight=ft.FontWeight.W_600,
-                        color=colors.text_primary,
-                    ),
-                ],
-                spacing=8,
-            ),
-            margin=ft.margin.only(bottom=12),
-        )
+        header = QWidget()
+        header.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+            }}
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 20, 20, 0)
 
-    def _build_subsection_title(self, title: str) -> ft.Container:
-        """Build a subsection title with proper spacing."""
-        colors = self.theme.colors
-        return ft.Container(
-            content=ft.Text(
-                title,
-                size=12,
-                weight=ft.FontWeight.W_500,
-                color=colors.text_tertiary,
-            ),
-            margin=ft.margin.only(top=12, bottom=4),
-        )
+        # Icon and title
+        title_row = QWidget()
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(12)
 
-    def _build_espanso_section(self):
-        """Build Espanso configuration section."""
-        colors = self.theme.colors
+        icon_label = QLabel("\u2699")  # Gear emoji
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 24px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(icon_label)
 
-        self.espanso_path_field = ft.TextField(
-            label="Config Path",
-            value=self.settings.espanso_config_path,
-            expand=True,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            hint_text="Path to Espanso configuration directory",
-        )
+        title = QLabel("Settings")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(title)
 
-        browse_button = ft.ElevatedButton(
-            text="Browse",
-            icon=ft.Icons.FOLDER_OPEN,
-            on_click=self._on_browse_espanso_path,
-        )
+        header_layout.addWidget(title_row)
+        header_layout.addStretch()
 
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    self._build_section_header(ft.Icons.FOLDER_OUTLINED, "Espanso Configuration"),
-                    ft.Row(
-                        controls=[
-                            self.espanso_path_field,
-                            browse_button,
-                        ],
-                        spacing=12,
-                    ),
-                    ft.Text(
-                        "Location of your Espanso configuration files",
-                        size=11,
-                        color=colors.text_tertiary,
-                    ),
-                ],
-                spacing=8,
-            ),
-            bgcolor=colors.bg_surface,
-            padding=16,
-            border_radius=12,
-            border=ft.border.all(1, colors.border_muted),
-        )
+        # Close button
+        close_btn = QPushButton("\u2715")  # X symbol
+        close_btn.setFixedSize(32, 32)
+        close_btn.clicked.connect(self.close_requested.emit)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_elevated};
+            }}
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(close_btn)
 
-    def _build_espanso_options_section(self):
-        """Build Espanso options section for default.yml settings."""
-        colors = self.theme.colors
-        config = self.espanso_config or EspansoConfig()
+        return header
 
-        # === UI & Notifications ===
-        self.esp_show_icon = ft.Switch(
-            label="Show tray icon",
-            value=config.show_icon,
-        )
+    def _create_action_buttons(self) -> QWidget:
+        """Create action buttons row."""
+        colors = self.theme_manager.colors
 
-        self.esp_show_notifications = ft.Switch(
-            label="Show notifications",
-            value=config.show_notifications,
-        )
+        actions = QWidget()
+        actions.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+                border-bottom: 1px solid {colors.border_muted};
+            }}
+        """)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(20, 16, 20, 16)
 
-        # === Behavior ===
-        self.esp_auto_restart = ft.Switch(
-            label="Auto-restart on config change",
-            value=config.auto_restart,
-        )
+        # Reset button
+        reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.clicked.connect(self._on_reset_defaults)
+        reset_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                color: {colors.text_primary};
+                text-decoration: underline;
+            }}
+        """)
+        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        actions_layout.addWidget(reset_btn)
+        actions_layout.addStretch()
 
-        self.esp_preserve_clipboard = ft.Switch(
-            label="Preserve clipboard after expansion",
-            value=config.preserve_clipboard,
-        )
+        # Save button
+        save_btn = QPushButton("\u1F4BE Save Settings")
+        save_btn.clicked.connect(self._on_save)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 24px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        actions_layout.addWidget(save_btn)
 
-        self.esp_undo_backspace = ft.Switch(
-            label="Undo expansion with backspace",
-            value=config.undo_backspace,
-        )
+        return actions
 
-        self.esp_enable = ft.Switch(
-            label="Enable Espanso",
-            value=config.enable,
-        )
+    def _create_content(self) -> QWidget:
+        """Create scrollable settings content."""
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(20, 16, 20, 20)
+        content_layout.setSpacing(16)
 
-        self.esp_apply_patch = ft.Switch(
-            label="Apply app-specific patches",
-            value=config.apply_patch,
-        )
+        # Appearance section
+        appearance_section = self._create_appearance_section()
+        content_layout.addWidget(appearance_section)
 
-        # === Toggle Key ===
-        self.esp_toggle_key = ft.Dropdown(
-            label="Toggle key",
-            value=config.toggle_key,
-            options=[ft.dropdown.Option(key, label) for key, label in TOGGLE_KEY_OPTIONS],
-            width=200,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-        )
+        # Espanso section
+        espanso_section = self._create_espanso_section()
+        content_layout.addWidget(espanso_section)
 
-        # === Search ===
-        self.esp_search_shortcut = HotkeyRecorder(
-            value=config.search_shortcut,
-            label="Search shortcut",
-            width=280,
-            colors=colors,
-        )
+        # GitHub Sync section
+        sync_section = self._create_sync_section()
+        content_layout.addWidget(sync_section)
 
-        self.esp_search_trigger = ft.TextField(
-            label="Search trigger word",
-            value=config.search_trigger,
-            width=200,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            hint_text="off (disabled)",
-        )
+        # Hotkeys section
+        hotkeys_section = self._create_hotkeys_section()
+        content_layout.addWidget(hotkeys_section)
 
-        # === Backend ===
-        self.esp_backend = ft.Dropdown(
-            label="Injection backend",
-            value=config.backend,
-            options=[ft.dropdown.Option(key, label) for key, label in BACKEND_OPTIONS],
-            width=200,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-        )
+        content_layout.addStretch()
 
-        self.esp_paste_shortcut = HotkeyRecorder(
-            value=config.paste_shortcut,
-            label="Paste shortcut",
-            width=280,
-            colors=colors,
-        )
+        return content
 
-        # === Timing (Advanced) ===
-        self.esp_inject_delay = ft.TextField(
-            label="Inject delay (ms)",
-            value=str(config.inject_delay),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+    def _create_section_card(self, title: str, icon: str, content_widget: QWidget) -> QFrame:
+        """Create a settings section card."""
+        colors = self.theme_manager.colors
 
-        self.esp_key_delay = ft.TextField(
-            label="Key delay (ms)",
-            value=str(config.key_delay),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border: 1px solid {colors.border_muted};
+                border-radius: 12px;
+            }}
+        """)
 
-        self.esp_clipboard_threshold = ft.TextField(
-            label="Clipboard threshold",
-            value=str(config.clipboard_threshold),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
-        self.esp_backspace_limit = ft.TextField(
-            label="Backspace limit",
-            value=str(config.backspace_limit),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        # Header
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
 
-        self.esp_pre_paste_delay = ft.TextField(
-            label="Pre-paste delay (ms)",
-            value=str(config.pre_paste_delay),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        # Icon
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 20px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(icon_label)
 
-        self.esp_restore_clipboard_delay = ft.TextField(
-            label="Restore clipboard delay (ms)",
-            value=str(config.restore_clipboard_delay),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        # Title
+        title_label = QLabel(title)
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
 
-        # === Form Settings ===
-        self.esp_max_form_width = ft.TextField(
-            label="Max form width (px)",
-            value=str(config.max_form_width),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        layout.addWidget(header)
 
-        self.esp_max_form_height = ft.TextField(
-            label="Max form height (px)",
-            value=str(config.max_form_height),
-            width=120,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        # Content
+        layout.addWidget(content_widget)
 
-        # Expandable advanced section
-        self.esp_advanced_expanded = False
-        self.esp_advanced_content = ft.Container(
-            content=ft.Column(
-                controls=[
-                    self._build_subsection_title("Timing"),
-                    ft.Row(
-                        controls=[
-                            self.esp_inject_delay,
-                            self.esp_key_delay,
-                            self.esp_clipboard_threshold,
-                        ],
-                        spacing=12,
-                        wrap=True,
-                    ),
-                    ft.Row(
-                        controls=[
-                            self.esp_backspace_limit,
-                            self.esp_pre_paste_delay,
-                            self.esp_restore_clipboard_delay,
-                        ],
-                        spacing=12,
-                        wrap=True,
-                    ),
-                    self._build_subsection_title("Form Dimensions"),
-                    ft.Row(
-                        controls=[
-                            self.esp_max_form_width,
-                            self.esp_max_form_height,
-                        ],
-                        spacing=12,
-                    ),
-                ],
-                spacing=6,
-            ),
-            padding=ft.padding.only(top=8),
-            visible=False,
-        )
+        return card
 
-        self.esp_advanced_toggle_icon = ft.Icon(
-            ft.Icons.KEYBOARD_ARROW_RIGHT,
-            size=18,
-            color=colors.text_secondary,
-        )
+    def _create_appearance_section(self) -> QFrame:
+        """Create appearance settings section."""
+        colors = self.theme_manager.colors
 
-        advanced_toggle = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.esp_advanced_toggle_icon,
-                    ft.Text("Advanced Options", size=13, color=colors.text_secondary),
-                ],
-                spacing=4,
-            ),
-            on_click=self._toggle_esp_advanced,
-            padding=ft.padding.symmetric(vertical=8),
-            ink=True,
-        )
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
 
-        # Note about Espanso restart
-        restart_note = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.INFO_OUTLINE, size=14, color=colors.primary),
-                    ft.Text(
-                        "Changes apply when Espanso restarts. Enable 'Auto-restart on config change' for immediate effect.",
-                        size=11,
-                        color=colors.text_secondary,
-                        expand=True,
-                    ),
-                ],
-                spacing=8,
-            ),
-            bgcolor=colors.bg_elevated,
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
-            border_radius=6,
-            margin=ft.margin.only(top=4, bottom=4),
-        )
+        # Theme selection
+        theme_label = QLabel("Theme")
+        theme_label_font = QFont()
+        theme_label_font.setPointSize(10)
+        theme_label_font.setBold(True)
+        theme_label.setFont(theme_label_font)
+        theme_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(theme_label)
 
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    self._build_section_header(ft.Icons.TUNE, "Espanso Options"),
-                    ft.Text(
-                        "Configure Espanso's default.yml settings",
-                        size=11,
-                        color=colors.text_tertiary,
-                    ),
-                    restart_note,
-                    # UI & Notifications
-                    self._build_subsection_title("Interface"),
-                    ft.Row(controls=[self.esp_show_icon, self.esp_show_notifications], spacing=24, wrap=True),
-                    # Behavior
-                    self._build_subsection_title("Behavior"),
-                    ft.Row(controls=[self.esp_enable, self.esp_auto_restart], spacing=24, wrap=True),
-                    ft.Row(controls=[self.esp_preserve_clipboard, self.esp_undo_backspace], spacing=24, wrap=True),
-                    self.esp_apply_patch,
-                    # Toggle & Search
-                    self._build_subsection_title("Toggle & Search"),
-                    ft.Row(
-                        controls=[self.esp_toggle_key, self.esp_search_shortcut, self.esp_search_trigger],
-                        spacing=12,
-                        wrap=True,
-                    ),
-                    # Backend
-                    self._build_subsection_title("Backend"),
-                    ft.Row(
-                        controls=[self.esp_backend, self.esp_paste_shortcut],
-                        spacing=12,
-                    ),
-                    # Advanced section
-                    ft.Container(height=8),
-                    ft.Divider(height=1, color=colors.border_muted),
-                    advanced_toggle,
-                    self.esp_advanced_content,
-                ],
-                spacing=6,
-            ),
-            bgcolor=colors.bg_surface,
-            padding=16,
-            border_radius=12,
-            border=ft.border.all(1, colors.border_muted),
-        )
+        # Radio buttons for theme
+        theme_row = QWidget()
+        theme_layout = QHBoxLayout(theme_row)
+        theme_layout.setContentsMargins(0, 0, 0, 0)
+        theme_layout.setSpacing(16)
 
-    def _toggle_esp_advanced(self, e=None):
-        """Toggle Espanso advanced options visibility."""
-        self.esp_advanced_expanded = not self.esp_advanced_expanded
-        self.esp_advanced_content.visible = self.esp_advanced_expanded
-        self.esp_advanced_toggle_icon.name = (
-            ft.Icons.KEYBOARD_ARROW_DOWN if self.esp_advanced_expanded else ft.Icons.KEYBOARD_ARROW_RIGHT
-        )
-        if self._mounted:
-            self.update()
+        self.theme_group = QButtonGroup()
 
-    def _build_sync_section(self):
-        """Build GitHub sync section."""
-        colors = self.theme.colors
+        self.light_radio = QRadioButton("Light")
+        self.dark_radio = QRadioButton("Dark")
+        self.system_radio = QRadioButton("System")
 
-        self.github_repo_field = ft.TextField(
-            label="Repository",
-            value=self.settings.github_repo or "",
-            expand=True,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            hint_text="username/repository",
-        )
+        self.theme_group.addButton(self.light_radio, 0)
+        self.theme_group.addButton(self.dark_radio, 1)
+        self.theme_group.addButton(self.system_radio, 2)
 
-        self.auto_sync_checkbox = ft.Checkbox(
-            label="Auto-sync on changes",
-            value=self.settings.auto_sync,
-        )
+        # Set current theme
+        if self.settings.theme == "light":
+            self.light_radio.setChecked(True)
+        elif self.settings.theme == "dark":
+            self.dark_radio.setChecked(True)
+        else:
+            self.system_radio.setChecked(True)
 
-        self.sync_interval_field = ft.TextField(
-            label="Sync interval (minutes)",
-            value=str(self.settings.sync_interval // 60),
-            width=200,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
+        theme_layout.addWidget(self.light_radio)
+        theme_layout.addWidget(self.dark_radio)
+        theme_layout.addWidget(self.system_radio)
+        theme_layout.addStretch()
+
+        content_layout.addWidget(theme_row)
+
+        # Default prefix
+        prefix_label = QLabel("Default Prefix")
+        prefix_label.setFont(theme_label_font)
+        prefix_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(prefix_label)
+
+        self.default_prefix_dropdown = QComboBox()
+        self.default_prefix_dropdown.addItem(": (colon)", ":")
+        self.default_prefix_dropdown.addItem("; (semicolon)", ";")
+        self.default_prefix_dropdown.addItem("// (double slash)", "//")
+        self.default_prefix_dropdown.addItem(":: (double colon)", "::")
+        self.default_prefix_dropdown.addItem("(none)", "")
+
+        # Set current value
+        for i in range(self.default_prefix_dropdown.count()):
+            if self.default_prefix_dropdown.itemData(i) == self.settings.default_prefix:
+                self.default_prefix_dropdown.setCurrentIndex(i)
+                break
+
+        self.default_prefix_dropdown.setMaximumWidth(200)
+        content_layout.addWidget(self.default_prefix_dropdown)
+
+        help_text = QLabel("Default trigger prefix for new entries")
+        help_text.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(help_text)
+
+        return self._create_section_card("Appearance", "\u1F3A8", content)
+
+    def _create_espanso_section(self) -> QFrame:
+        """Create Espanso configuration section."""
+        colors = self.theme_manager.colors
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
+        # Config path
+        path_label = QLabel("Config Path")
+        path_label_font = QFont()
+        path_label_font.setPointSize(10)
+        path_label_font.setBold(True)
+        path_label.setFont(path_label_font)
+        path_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(path_label)
+
+        path_row = QWidget()
+        path_layout = QHBoxLayout(path_row)
+        path_layout.setContentsMargins(0, 0, 0, 0)
+        path_layout.setSpacing(12)
+
+        self.espanso_path_field = QLineEdit()
+        self.espanso_path_field.setText(self.settings.espanso_config_path)
+        self.espanso_path_field.setPlaceholderText("Path to Espanso configuration directory")
+        path_layout.addWidget(self.espanso_path_field, stretch=1)
+
+        browse_btn = QPushButton("\u1F4C2 Browse")
+        browse_btn.clicked.connect(self._on_browse_espanso_path)
+        browse_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_surface};
+                border-color: {colors.primary};
+            }}
+        """)
+        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        path_layout.addWidget(browse_btn)
+
+        content_layout.addWidget(path_row)
+
+        help_text = QLabel("Location of your Espanso configuration files")
+        help_text.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(help_text)
+
+        return self._create_section_card("Espanso Configuration", "\u1F4C1", content)
+
+    def _create_sync_section(self) -> QFrame:
+        """Create GitHub sync section."""
+        colors = self.theme_manager.colors
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
 
         # Connection status
         is_connected = bool(self.settings.github_repo and self.settings.github_token)
         status_text = "Connected" if is_connected else "Not connected"
+        status_icon = "\u2713" if is_connected else "\u2601"
         status_color = colors.success if is_connected else colors.text_tertiary
-        status_icon = ft.Icons.CHECK_CIRCLE if is_connected else ft.Icons.CLOUD_OFF
 
-        connection_button = ft.ElevatedButton(
-            text="Disconnect" if is_connected else "Connect with GitHub",
-            icon=ft.Icons.LINK_OFF if is_connected else ft.Icons.LINK,
-            bgcolor=colors.error if is_connected else colors.primary,
-            color=colors.text_inverse,
-            on_click=self._on_toggle_github_connection,
-        )
+        status_row = QWidget()
+        status_layout = QHBoxLayout(status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
 
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    self._build_section_header(ft.Icons.CLOUD_SYNC, "GitHub Sync"),
-                    ft.Row(
-                        controls=[
-                            ft.Icon(status_icon, color=status_color, size=18),
-                            ft.Text(status_text, size=13, color=status_color),
-                        ],
-                        spacing=8,
-                    ),
-                    ft.Container(height=8),
-                    self.github_repo_field,
-                    connection_button,
-                    ft.Container(height=12),
-                    self.auto_sync_checkbox,
-                    self.sync_interval_field,
-                    ft.Text(
-                        "Note: OAuth integration is not yet implemented",
-                        size=11,
-                        color=colors.text_tertiary,
-                        italic=True,
-                    ),
-                ],
-                spacing=8,
-            ),
-            bgcolor=colors.bg_surface,
-            padding=16,
-            border_radius=12,
-            border=ft.border.all(1, colors.border_muted),
-        )
+        status_icon_label = QLabel(status_icon)
+        status_icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 18px;
+                color: {status_color};
+                background-color: transparent;
+            }}
+        """)
+        status_layout.addWidget(status_icon_label)
 
-    def _build_hotkeys_section(self):
-        """Build hotkeys section."""
-        colors = self.theme.colors
+        status_label = QLabel(status_text)
+        status_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 13px;
+                color: {status_color};
+                background-color: transparent;
+            }}
+        """)
+        status_layout.addWidget(status_label)
+        status_layout.addStretch()
 
-        # Enable/Disable hotkeys toggle
-        self.hotkeys_enabled_switch = ft.Switch(
-            label="Enable global hotkeys",
-            value=self.settings.hotkeys_enabled if hasattr(self.settings, 'hotkeys_enabled') else True,
-        )
+        content_layout.addWidget(status_row)
 
+        # Repository field
+        repo_label = QLabel("Repository")
+        repo_label_font = QFont()
+        repo_label_font.setPointSize(10)
+        repo_label_font.setBold(True)
+        repo_label.setFont(repo_label_font)
+        repo_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(repo_label)
+
+        self.github_repo_field = QLineEdit()
+        self.github_repo_field.setText(self.settings.github_repo or "")
+        self.github_repo_field.setPlaceholderText("username/repository")
+        content_layout.addWidget(self.github_repo_field)
+
+        # Auto-sync checkbox
+        self.auto_sync_checkbox = QCheckBox("Auto-sync on changes")
+        self.auto_sync_checkbox.setChecked(self.settings.auto_sync)
+        content_layout.addWidget(self.auto_sync_checkbox)
+
+        # Sync interval
+        interval_label = QLabel("Sync interval (minutes)")
+        interval_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(interval_label)
+
+        self.sync_interval_field = QLineEdit()
+        self.sync_interval_field.setText(str(self.settings.sync_interval // 60))
+        self.sync_interval_field.setMaximumWidth(100)
+        content_layout.addWidget(self.sync_interval_field)
+
+        # Note
+        note = QLabel("Note: OAuth integration is not yet implemented")
+        note.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_tertiary};
+                font-style: italic;
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(note)
+
+        return self._create_section_card("GitHub Sync", "\u21BB", content)
+
+    def _create_hotkeys_section(self) -> QFrame:
+        """Create hotkeys settings section."""
+        colors = self.theme_manager.colors
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
+        # Info box
+        info_box = QFrame()
+        info_box.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_elevated};
+                border: 1px solid {colors.border_muted};
+                border-radius: 6px;
+                padding: 12px;
+            }}
+        """)
+        info_layout = QHBoxLayout(info_box)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+
+        info_icon = QLabel("\u2139")
+        info_icon.setStyleSheet(f"""
+            QLabel {{
+                font-size: 14px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        info_layout.addWidget(info_icon)
+
+        info_text = QLabel("Press the hotkey anywhere to open Quick Add. If text is selected, it will be used as the replacement.")
+        info_text.setWordWrap(True)
+        info_text.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        info_layout.addWidget(info_text, stretch=1)
+
+        content_layout.addWidget(info_box)
+
+        # Enable hotkeys
+        self.hotkeys_enabled_switch = QCheckBox("Enable global hotkeys")
+        self.hotkeys_enabled_switch.setChecked(self.settings.hotkeys_enabled)
+        content_layout.addWidget(self.hotkeys_enabled_switch)
+
+        # Quick add hotkey recorder
         self.quick_add_hotkey_recorder = HotkeyRecorder(
+            theme_manager=self.theme_manager,
             value=self.settings.quick_add_hotkey,
             label="Quick Add Hotkey",
-            width=320,
-            colors=colors,
         )
+        self.quick_add_hotkey_recorder.setMaximumWidth(350)
+        content_layout.addWidget(self.quick_add_hotkey_recorder)
 
-        self.minimize_to_tray_checkbox = ft.Checkbox(
-            label="Minimize to system tray",
-            value=self.settings.minimize_to_tray,
+        # Minimize to tray
+        self.minimize_to_tray_checkbox = QCheckBox("Minimize to system tray")
+        self.minimize_to_tray_checkbox.setChecked(self.settings.minimize_to_tray)
+        content_layout.addWidget(self.minimize_to_tray_checkbox)
+
+        return self._create_section_card("Hotkeys & Behavior", "\u2328", content)
+
+    def _on_browse_espanso_path(self):
+        """Handle browse button for Espanso path."""
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Espanso Config Directory",
+            self.espanso_path_field.text() or str(Path.home()),
         )
+        if directory:
+            self.espanso_path_field.setText(directory)
 
-        # Info note about how hotkeys work
-        hotkey_info = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.INFO_OUTLINE, size=14, color=colors.primary),
-                    ft.Text(
-                        "Press the hotkey anywhere to open Quick Add. If text is selected, it will be used as the replacement.",
-                        size=11,
-                        color=colors.text_secondary,
-                        expand=True,
-                    ),
-                ],
-                spacing=8,
-            ),
-            bgcolor=colors.bg_elevated,
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
-            border_radius=6,
-        )
-
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    self._build_section_header(ft.Icons.KEYBOARD, "Hotkeys & Behavior"),
-                    hotkey_info,
-                    ft.Container(height=8),
-                    self.hotkeys_enabled_switch,
-                    ft.Container(height=8),
-                    self.quick_add_hotkey_recorder,
-                    ft.Container(height=12),
-                    self.minimize_to_tray_checkbox,
-                ],
-                spacing=8,
-            ),
-            bgcolor=colors.bg_surface,
-            padding=16,
-            border_radius=12,
-            border=ft.border.all(1, colors.border_muted),
-        )
-
-    def _build_appearance_section(self):
-        """Build appearance section."""
-        colors = self.theme.colors
-
-        self.theme_radio_group = ft.RadioGroup(
-            content=ft.Row(
-                controls=[
-                    ft.Radio(value="light", label="Light"),
-                    ft.Radio(value="dark", label="Dark"),
-                    ft.Radio(value="system", label="System"),
-                ],
-                spacing=16,
-            ),
-            value=self.settings.theme,
-        )
-
-        self.default_prefix_dropdown = ft.Dropdown(
-            label="Default Prefix",
-            value=self.settings.default_prefix,
-            options=[
-                ft.dropdown.Option(":", ": (colon)"),
-                ft.dropdown.Option(";", "; (semicolon)"),
-                ft.dropdown.Option("//", "// (double slash)"),
-                ft.dropdown.Option("::", ":: (double colon)"),
-                ft.dropdown.Option("", "(none)"),
-            ],
-            width=200,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_default,
-            focused_border_color=colors.border_focus,
-        )
-
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    self._build_section_header(ft.Icons.PALETTE, "Appearance"),
-                    ft.Text(
-                        "Theme",
-                        size=13,
-                        weight=ft.FontWeight.W_500,
-                        color=colors.text_primary,
-                    ),
-                    self.theme_radio_group,
-                    ft.Container(height=8),
-                    self.default_prefix_dropdown,
-                    ft.Text(
-                        "Default trigger prefix for new entries",
-                        size=11,
-                        color=colors.text_tertiary,
-                    ),
-                ],
-                spacing=8,
-            ),
-            bgcolor=colors.bg_surface,
-            padding=16,
-            border_radius=12,
-            border=ft.border.all(1, colors.border_muted),
-        )
-
-    def _on_folder_picked(self, e: ft.FilePickerResultEvent):
-        """Handle folder picker result."""
-        if e.path:
-            self.espanso_path_field.value = e.path
-            if self._mounted:
-                self.update()
-
-    def _on_toggle_github_connection(self, e):
-        """Handle GitHub connection toggle."""
-        is_connected = bool(self.settings.github_repo and self.settings.github_token)
-
-        if is_connected:
-            # Disconnect
-            self._confirm_disconnect()
-        else:
-            # Connect - would open OAuth flow in real implementation
-            self._show_snackbar("GitHub OAuth integration coming soon")
-
-    def _confirm_disconnect(self):
-        """Confirm GitHub disconnection."""
-        colors = self.theme.colors
-
-        def disconnect_confirmed(e):
-            dialog.open = False
-            self.page.update()
-
-            # Clear GitHub settings
-            self.settings.github_repo = None
-            self.settings.github_token = None
-            self.app_state.save_settings()
-
-            self._show_snackbar("Disconnected from GitHub")
-            # Rebuild to update UI
-            self._build()
-            if self._mounted:
-                self.update()
-
-        def cancel_disconnect(e):
-            dialog.open = False
-            self.page.update()
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.WARNING_AMBER, color=colors.warning),
-                    ft.Text("Confirm Disconnect", color=colors.text_primary),
-                ],
-                spacing=8,
-            ),
-            content=ft.Text(
-                "Are you sure you want to disconnect from GitHub? Your local entries will not be affected.",
-                size=14,
-                color=colors.text_primary,
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=cancel_disconnect),
-                ft.ElevatedButton(
-                    "Disconnect",
-                    bgcolor=colors.error,
-                    color=colors.text_inverse,
-                    on_click=disconnect_confirmed,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_surface,
-        )
-
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
-
-    def _on_reset_defaults(self, e):
+    def _on_reset_defaults(self):
         """Reset settings to defaults."""
-        colors = self.theme.colors
+        reply = QMessageBox.question(
+            self,
+            "Reset to Defaults",
+            "Are you sure you want to reset all settings to their default values?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
 
-        def reset_confirmed(e):
-            dialog.open = False
-            self.page.update()
-
-            # Create new settings with defaults
-            from espanded.core.models import Settings
+        if reply == QMessageBox.StandardButton.Yes:
+            # Create new default settings
             self.settings = Settings()
             self.app_state.settings = self.settings
 
-            self._show_snackbar("Settings reset to defaults")
-            # Rebuild to update UI
-            self._build()
-            if self._mounted:
-                self.update()
+            # Rebuild UI to reflect defaults
+            self._rebuild_ui()
 
             # Notify theme change
-            if self.on_theme_change:
-                self.on_theme_change()
+            self.theme_changed.emit()
 
-        def cancel_reset(e):
-            dialog.open = False
-            self.page.update()
+            QMessageBox.information(self, "Settings Reset", "Settings have been reset to defaults")
 
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.WARNING_AMBER, color=colors.warning),
-                    ft.Text("Reset to Defaults", color=colors.text_primary),
-                ],
-                spacing=8,
-            ),
-            content=ft.Text(
-                "Are you sure you want to reset all settings to their default values?",
-                size=14,
-                color=colors.text_primary,
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=cancel_reset),
-                ft.ElevatedButton(
-                    "Reset",
-                    bgcolor=colors.warning,
-                    color=colors.text_inverse,
-                    on_click=reset_confirmed,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_surface,
-        )
+    def _rebuild_ui(self):
+        """Rebuild UI with current settings values."""
+        # Theme
+        if self.settings.theme == "light":
+            self.light_radio.setChecked(True)
+        elif self.settings.theme == "dark":
+            self.dark_radio.setChecked(True)
+        else:
+            self.system_radio.setChecked(True)
 
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
+        # Default prefix
+        for i in range(self.default_prefix_dropdown.count()):
+            if self.default_prefix_dropdown.itemData(i) == self.settings.default_prefix:
+                self.default_prefix_dropdown.setCurrentIndex(i)
+                break
 
-    def _on_save(self, e):
+        # Espanso
+        self.espanso_path_field.setText(self.settings.espanso_config_path)
+
+        # GitHub
+        self.github_repo_field.setText(self.settings.github_repo or "")
+        self.auto_sync_checkbox.setChecked(self.settings.auto_sync)
+        self.sync_interval_field.setText(str(self.settings.sync_interval // 60))
+
+        # Hotkeys
+        self.hotkeys_enabled_switch.setChecked(self.settings.hotkeys_enabled)
+        self.quick_add_hotkey_recorder.set_value(self.settings.quick_add_hotkey)
+        self.minimize_to_tray_checkbox.setChecked(self.settings.minimize_to_tray)
+
+    def _on_save(self):
         """Save settings."""
         try:
+            # Get theme selection
+            if self.light_radio.isChecked():
+                theme = "light"
+            elif self.dark_radio.isChecked():
+                theme = "dark"
+            else:
+                theme = "system"
+
+            # Check if theme changed
+            old_theme = self.settings.theme
+            theme_changed = old_theme != theme
+
             # Update settings from form fields
-            self.settings.espanso_config_path = self.espanso_path_field.value
-            self.settings.github_repo = self.github_repo_field.value or None
-            self.settings.auto_sync = self.auto_sync_checkbox.value
+            self.settings.theme = theme
+            self.settings.default_prefix = self.default_prefix_dropdown.currentData()
+            self.settings.espanso_config_path = self.espanso_path_field.text()
+            self.settings.github_repo = self.github_repo_field.text() or None
+            self.settings.auto_sync = self.auto_sync_checkbox.isChecked()
 
             # Parse sync interval
             try:
-                interval_minutes = int(self.sync_interval_field.value)
+                interval_minutes = int(self.sync_interval_field.text())
                 self.settings.sync_interval = interval_minutes * 60
             except ValueError:
-                self.settings.sync_interval = 300  # Default 5 minutes
+                self.settings.sync_interval = 10800  # Default 3 hours
 
-            # Check if hotkey changed
-            old_hotkey = self.settings.quick_add_hotkey
-            new_hotkey = self.quick_add_hotkey_recorder.value
+            # Hotkeys
+            self.settings.quick_add_hotkey = self.quick_add_hotkey_recorder.get_value()
+            self.settings.hotkeys_enabled = self.hotkeys_enabled_switch.isChecked()
+            self.settings.minimize_to_tray = self.minimize_to_tray_checkbox.isChecked()
 
-            self.settings.quick_add_hotkey = new_hotkey
-            self.settings.hotkeys_enabled = self.hotkeys_enabled_switch.value
-            self.settings.minimize_to_tray = self.minimize_to_tray_checkbox.value
+            # Update hotkey service if settings changed
+            from espanded.services.hotkey_service import get_hotkey_service
 
-            # Theme settings
-            old_theme = self.settings.theme
-            self.settings.theme = self.theme_radio_group.value
-            self.settings.default_prefix = self.default_prefix_dropdown.value
+            hotkey_service = get_hotkey_service()
+            if hotkey_service and hotkey_service.is_running:
+                hotkey_service.update_hotkey(self.settings.quick_add_hotkey)
+                if self.settings.hotkeys_enabled:
+                    hotkey_service.enable()
+                else:
+                    hotkey_service.disable()
 
             # Save to database
             self.app_state.settings = self.settings
 
-            # Save Espanso options to default.yml
-            self._save_espanso_config()
+            # Emit signals
+            self.settings_saved.emit()
+            if theme_changed:
+                self.theme_changed.emit()
 
-            # Update hotkey service if hotkey changed
-            if old_hotkey != new_hotkey:
-                try:
-                    from espanded.services.hotkey_service import get_hotkey_service
-                    hotkey_service = get_hotkey_service()
-                    if hotkey_service.is_available:
-                        hotkey_service.update_hotkey(new_hotkey)
-                        self._show_snackbar(f"Hotkey updated to: {new_hotkey}")
-                    else:
-                        self._show_snackbar("Settings saved (hotkey requires restart)")
-                except Exception as ex:
-                    print(f"Error updating hotkey service: {ex}")
-                    self._show_snackbar("Settings saved (hotkey requires restart)")
-            else:
-                self._show_snackbar("Settings saved successfully")
-
-            # If theme changed, notify parent
-            if old_theme != self.settings.theme and self.on_theme_change:
-                self.on_theme_change()
+            QMessageBox.information(self, "Settings Saved", "Settings saved successfully")
 
         except Exception as ex:
-            self._show_snackbar(f"Error saving settings: {str(ex)}", error=True)
-
-    def _save_espanso_config(self):
-        """Save Espanso options to default.yml."""
-        if not self.settings.espanso_config_path:
-            return
-
-        # Build config from form fields
-        config = EspansoConfig(
-            # UI & Notifications
-            show_icon=self.esp_show_icon.value,
-            show_notifications=self.esp_show_notifications.value,
-            # Behavior
-            auto_restart=self.esp_auto_restart.value,
-            preserve_clipboard=self.esp_preserve_clipboard.value,
-            undo_backspace=self.esp_undo_backspace.value,
-            enable=self.esp_enable.value,
-            apply_patch=self.esp_apply_patch.value,
-            # Toggle & Search
-            toggle_key=self.esp_toggle_key.value or "OFF",
-            search_shortcut=self.esp_search_shortcut.value or "ALT+SPACE",
-            search_trigger=self.esp_search_trigger.value or "off",
-            # Backend
-            backend=self.esp_backend.value or "Auto",
-            paste_shortcut=self.esp_paste_shortcut.value or "CTRL+V",
-            # Timing (parse integers safely)
-            inject_delay=self._parse_int(self.esp_inject_delay.value, 0),
-            key_delay=self._parse_int(self.esp_key_delay.value, 0),
-            clipboard_threshold=self._parse_int(self.esp_clipboard_threshold.value, 100),
-            backspace_limit=self._parse_int(self.esp_backspace_limit.value, 5),
-            pre_paste_delay=self._parse_int(self.esp_pre_paste_delay.value, 300),
-            restore_clipboard_delay=self._parse_int(self.esp_restore_clipboard_delay.value, 300),
-            # Form dimensions
-            max_form_width=self._parse_int(self.esp_max_form_width.value, 700),
-            max_form_height=self._parse_int(self.esp_max_form_height.value, 500),
-        )
-
-        # Save to file
-        handler = EspansoConfigHandler(self.settings.espanso_config_path)
-        handler.save(config)
-
-        # Update local state
-        self.espanso_config = config
-
-    def _parse_int(self, value: str, default: int) -> int:
-        """Safely parse an integer from string."""
-        try:
-            return int(value) if value else default
-        except ValueError:
-            return default
-
-    def _show_snackbar(self, message: str, error: bool = False):
-        """Show a snackbar notification."""
-        colors = self.theme.colors
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(message, color=colors.text_primary),
-            bgcolor=colors.error if error else colors.success,
-            duration=2000,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+            QMessageBox.critical(self, "Error", f"Error saving settings: {str(ex)}")

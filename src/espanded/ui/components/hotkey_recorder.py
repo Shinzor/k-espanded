@@ -1,67 +1,40 @@
-"""Hotkey recorder component for capturing keyboard shortcuts."""
+"""Qt hotkey recorder widget for capturing keyboard shortcuts."""
 
-import flet as ft
-from typing import Callable
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QFrame,
+)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeyEvent
 
-# Default hotkey
-DEFAULT_HOTKEY = "<ctrl>+<alt>+`"
-PYNPUT_AVAILABLE = False
+from espanded.ui.theme import ThemeManager
 
-# Try to import hotkey utilities
+# Import hotkey utilities
 try:
     from espanded.hotkeys.listener import (
-        DEFAULT_HOTKEY as _DEFAULT_HOTKEY,
-        normalize_hotkey as _normalize_hotkey,
-        display_hotkey as _display_hotkey,
-        test_hotkey as _test_hotkey,
-        PYNPUT_AVAILABLE as _PYNPUT_AVAILABLE,
+        DEFAULT_HOTKEY,
+        normalize_hotkey,
+        display_hotkey,
+        test_hotkey,
+        PYNPUT_AVAILABLE,
     )
-    DEFAULT_HOTKEY = _DEFAULT_HOTKEY
-    PYNPUT_AVAILABLE = _PYNPUT_AVAILABLE
+except ImportError:
+    DEFAULT_HOTKEY = "<ctrl>+<alt>+`"
+    PYNPUT_AVAILABLE = False
 
     def normalize_hotkey(x):
-        return _normalize_hotkey(x)
+        return x
 
     def display_hotkey(x):
-        return _display_hotkey(x)
+        return x.replace("<", "").replace(">", "")
 
     def test_hotkey(x):
-        return _test_hotkey(x)
-except ImportError:
-    # Fallback implementations when pynput is not available
-    def normalize_hotkey(hotkey_string: str) -> str:
-        """Normalize hotkey string to pynput format."""
-        if not hotkey_string:
-            return DEFAULT_HOTKEY
-        hotkey = hotkey_string.lower().strip()
-        parts = hotkey.split("+")
-        normalized = []
-        modifiers = {"ctrl": "<ctrl>", "control": "<ctrl>", "alt": "<alt>",
-                     "shift": "<shift>", "meta": "<cmd>", "cmd": "<cmd>", "win": "<cmd>"}
-        for part in parts:
-            part = part.strip()
-            if part in modifiers:
-                normalized.append(modifiers[part])
-            elif part.startswith("<") and part.endswith(">"):
-                normalized.append(part)
-            elif len(part) == 1:
-                normalized.append(part)
-            else:
-                normalized.append(part)
-        return "+".join(normalized)
-
-    def display_hotkey(hotkey_string: str) -> str:
-        """Convert pynput hotkey format to display format."""
-        if not hotkey_string:
-            return "Not set"
-        display = hotkey_string.replace("<", "").replace(">", "")
-        parts = display.split("+")
-        formatted = [p.capitalize() if len(p) > 1 else p for p in parts if p]
-        return " + ".join(formatted)
-
-    def test_hotkey(hotkey_string: str) -> tuple:
-        """Test if a hotkey is valid."""
-        return (False, "pynput not installed - hotkeys will work after restart")
+        return (False, "pynput not available")
 
 
 # Common system shortcuts that might conflict
@@ -83,16 +56,9 @@ SYSTEM_SHORTCUTS = {
     "<alt>+<f4>": "Close Window",
 }
 
-# Keys that are only modifiers (not valid as primary keys)
-MODIFIER_ONLY_KEYS = {
-    "Control Left", "Control Right", "Shift Left", "Shift Right",
-    "Alt Left", "Alt Right", "Meta Left", "Meta Right",
-    "Control", "Shift", "Alt", "Meta",
-}
 
-
-class HotkeyRecorder(ft.Container):
-    """A component for recording keyboard shortcuts.
+class HotkeyRecorder(QWidget):
+    """Widget for recording keyboard shortcuts.
 
     Features:
     - Click Record to capture key combinations
@@ -102,169 +68,314 @@ class HotkeyRecorder(ft.Container):
     - Conflict warnings
     """
 
+    hotkey_changed = Signal(str)
+
     def __init__(
         self,
+        theme_manager: ThemeManager,
         value: str = "",
         label: str = "Hotkey",
-        width: int = 300,
-        on_change: Callable[[str], None] | None = None,
-        colors=None,
+        parent=None,
     ):
-        super().__init__()
-        # Normalize and store value
+        super().__init__(parent)
+        self.theme_manager = theme_manager
         self._hotkey_value = normalize_hotkey(value) if value else DEFAULT_HOTKEY
         self.label_text = label
-        self.width_value = width
-        self.on_change_callback = on_change
-        self.colors = colors
         self.is_recording = False
-        self._mounted = False
-        self._original_keyboard_handler = None
 
-        self._build()
+        self._setup_ui()
 
-    def did_mount(self):
-        """Called when control is added to page."""
-        self._mounted = True
-
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
-        if self.is_recording:
-            self._stop_recording()
-
-    @property
-    def value(self) -> str:
-        """Get the current hotkey value in pynput format."""
-        return self._hotkey_value
-
-    @value.setter
-    def value(self, new_value: str):
-        """Set the hotkey value."""
-        self._hotkey_value = normalize_hotkey(new_value) if new_value else DEFAULT_HOTKEY
-        self._update_display()
-        if self._mounted:
-            self.update()
-
-    def _build(self):
-        """Build the component layout."""
-        # Display showing current hotkey
-        self.hotkey_display = ft.Text(
-            display_hotkey(self._hotkey_value),
-            size=16,
-            weight=ft.FontWeight.W_600,
-        )
-
-        # Status text (recording, test results)
-        self.status_text = ft.Text(
-            "",
-            size=12,
-            visible=False,
-        )
-
-        # Manual input field for typing hotkey (for web mode)
-        self.manual_input = ft.TextField(
-            label="Type hotkey (e.g., ctrl+alt+p)",
-            value="",
-            width=200,
-            height=45,
-            visible=False,
-            on_submit=self._on_manual_submit,
-            hint_text="ctrl+alt+p",
-        )
-
-        # Record button
-        self.record_btn = ft.ElevatedButton(
-            text="Record",
-            icon=ft.Icons.FIBER_MANUAL_RECORD,
-            on_click=self._on_record_click,
-            height=36,
-            style=ft.ButtonStyle(
-                bgcolor={"": ft.Colors.BLUE_700},
-                color={"": ft.Colors.WHITE},
-            ),
-        )
-
-        # Manual entry button (for web mode where Record doesn't work)
-        self.manual_btn = ft.OutlinedButton(
-            text="Type",
-            icon=ft.Icons.KEYBOARD,
-            on_click=self._on_manual_click,
-            height=36,
-            tooltip="Manually type the hotkey (for web browser mode)",
-        )
-
-        # Test button
-        self.test_btn = ft.OutlinedButton(
-            text="Test",
-            icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
-            on_click=self._on_test_click,
-            height=36,
-        )
-
-        # Reset to default button
-        self.reset_btn = ft.IconButton(
-            icon=ft.Icons.REFRESH,
-            tooltip=f"Reset to default ({display_hotkey(DEFAULT_HOTKEY)})",
-            on_click=self._reset_to_default,
-            icon_size=20,
-        )
+    def _setup_ui(self):
+        """Build the widget UI."""
+        colors = self.theme_manager.colors
 
         # Main layout
-        self.content = ft.Column(
-            controls=[
-                ft.Text(self.label_text, size=13, weight=ft.FontWeight.W_500),
-                ft.Container(
-                    content=ft.Column(
-                        controls=[
-                            ft.Row(
-                                controls=[
-                                    self.hotkey_display,
-                                    self.reset_btn,
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                            ),
-                            self.status_text,
-                            ft.Row(
-                                controls=[
-                                    self.record_btn,
-                                    self.manual_btn,
-                                    self.test_btn,
-                                ],
-                                spacing=8,
-                            ),
-                            self.manual_input,
-                        ],
-                        spacing=10,
-                    ),
-                    padding=14,
-                    border_radius=8,
-                    border=ft.border.all(1, "#cccccc"),
-                ),
-            ],
-            spacing=6,
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Label
+        label = QLabel(self.label_text)
+        label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_primary};
+                font-size: 13px;
+                font-weight: 500;
+                background: transparent;
+            }}
+        """
         )
-        self.width = self.width_value
+        layout.addWidget(label)
 
-    def _on_manual_click(self, e=None):
-        """Toggle manual input field."""
-        self.manual_input.visible = not self.manual_input.visible
-        if self.manual_input.visible:
-            self.manual_input.value = self._hotkey_value.replace("<", "").replace(">", "")
-            self.status_text.value = "Type hotkey like: ctrl+alt+p, ctrl+shift+e"
-            self.status_text.color = ft.Colors.BLUE_700
-            self.status_text.visible = True
+        # Container with border
+        container = QFrame()
+        container.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {colors.bg_elevated};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+            }}
+        """
+        )
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(12, 12, 12, 12)
+        container_layout.setSpacing(10)
+
+        # Display row
+        display_row = QHBoxLayout()
+        display_row.setSpacing(8)
+
+        self.hotkey_display = QLabel(display_hotkey(self._hotkey_value))
+        self.hotkey_display.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_primary};
+                font-size: 14px;
+                font-weight: 600;
+                background: transparent;
+            }}
+        """
+        )
+        display_row.addWidget(self.hotkey_display, stretch=1)
+
+        # Reset button
+        reset_btn = QPushButton("⟲")
+        reset_btn.setFixedSize(28, 28)
+        reset_btn.setToolTip(f"Reset to default ({display_hotkey(DEFAULT_HOTKEY)})")
+        reset_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_secondary};
+                border: 1px solid {colors.border_muted};
+                border-radius: 14px;
+                font-size: 16px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.entry_hover};
+                border-color: {colors.primary};
+                color: {colors.primary};
+            }}
+        """
+        )
+        reset_btn.clicked.connect(self._on_reset)
+        display_row.addWidget(reset_btn)
+
+        container_layout.addLayout(display_row)
+
+        # Status text
+        self.status_label = QLabel()
+        self.status_label.setVisible(False)
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """
+        )
+        container_layout.addWidget(self.status_label)
+
+        # Manual input field (hidden by default)
+        self.manual_input = QLineEdit()
+        self.manual_input.setPlaceholderText("Type hotkey (e.g., ctrl+alt+p)")
+        self.manual_input.setVisible(False)
+        self.manual_input.setStyleSheet(
+            f"""
+            QLineEdit {{
+                background-color: {colors.bg_base};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 6px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {colors.primary};
+            }}
+        """
+        )
+        self.manual_input.returnPressed.connect(self._on_manual_submit)
+        container_layout.addWidget(self.manual_input)
+
+        # Button row
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+
+        # Record button
+        self.record_btn = QPushButton("Record")
+        self.record_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """
+        )
+        self.record_btn.clicked.connect(self._on_record)
+        button_row.addWidget(self.record_btn)
+
+        # Manual button
+        manual_btn = QPushButton("Type")
+        manual_btn.setProperty("secondary", True)
+        manual_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.entry_hover};
+                border-color: {colors.primary};
+            }}
+        """
+        )
+        manual_btn.clicked.connect(self._on_manual)
+        button_row.addWidget(manual_btn)
+
+        # Test button
+        test_btn = QPushButton("Test")
+        test_btn.setProperty("secondary", True)
+        test_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.bg_surface};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.entry_hover};
+                border-color: {colors.primary};
+            }}
+        """
+        )
+        test_btn.clicked.connect(self._on_test)
+        button_row.addWidget(test_btn)
+
+        container_layout.addLayout(button_row)
+
+        layout.addWidget(container)
+
+        # Check for conflicts on init
+        self._check_conflicts()
+
+    def get_value(self) -> str:
+        """Get the current hotkey value."""
+        return self._hotkey_value
+
+    def set_value(self, value: str):
+        """Set the hotkey value."""
+        self._hotkey_value = normalize_hotkey(value) if value else DEFAULT_HOTKEY
+        self.hotkey_display.setText(display_hotkey(self._hotkey_value))
+        self._check_conflicts()
+
+    def _on_record(self):
+        """Handle record button click."""
+        if self.is_recording:
+            self._stop_recording()
         else:
-            self.status_text.visible = False
-        if self._mounted:
-            self.update()
+            self._start_recording()
 
-    def _on_manual_submit(self, e=None):
-        """Handle manual hotkey input submission."""
-        if not self.manual_input.value:
+    def _start_recording(self):
+        """Start recording keyboard input."""
+        self.is_recording = True
+        colors = self.theme_manager.colors
+
+        # Update UI
+        self.hotkey_display.setText("Press key combination...")
+        self.record_btn.setText("Cancel")
+        self.record_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.error};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.error};
+            }}
+        """
+        )
+        self.status_label.setText("Press your key combination... (Esc to cancel)")
+        self.status_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.warning};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """
+        )
+        self.status_label.setVisible(True)
+
+        # Grab keyboard focus
+        self.setFocus()
+
+    def _stop_recording(self):
+        """Stop recording keyboard input."""
+        self.is_recording = False
+        colors = self.theme_manager.colors
+
+        # Restore UI
+        self.hotkey_display.setText(display_hotkey(self._hotkey_value))
+        self.record_btn.setText("Record")
+        self.record_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """
+        )
+        self.status_label.setVisible(False)
+
+    def _on_manual(self):
+        """Toggle manual input field."""
+        self.manual_input.setVisible(not self.manual_input.isVisible())
+        if self.manual_input.isVisible():
+            self.manual_input.setText(self._hotkey_value.replace("<", "").replace(">", ""))
+            self.manual_input.setFocus()
+            self.manual_input.selectAll()
+
+    def _on_manual_submit(self):
+        """Handle manual input submission."""
+        raw_input = self.manual_input.text().strip().lower()
+        if not raw_input:
             return
-
-        raw_input = self.manual_input.value.strip().lower()
 
         # Normalize the input
         normalized = normalize_hotkey(raw_input)
@@ -274,219 +385,134 @@ class HotkeyRecorder(ft.Container):
         has_modifier = any(p in ["<ctrl>", "<alt>", "<shift>", "<cmd>"] for p in parts)
         has_key = any(p not in ["<ctrl>", "<alt>", "<shift>", "<cmd>"] for p in parts)
 
+        colors = self.theme_manager.colors
+
         if has_modifier and has_key:
             self._hotkey_value = normalized
-            self._update_display()
-            self.manual_input.visible = False
-            self.status_text.value = f"✓ Set to: {display_hotkey(normalized)}"
-            self.status_text.color = ft.Colors.GREEN_700
-            self.status_text.visible = True
-
-            if self.on_change_callback:
-                self.on_change_callback(self._hotkey_value)
+            self.hotkey_display.setText(display_hotkey(self._hotkey_value))
+            self.manual_input.setVisible(False)
+            self._show_status(f"✓ Set to: {display_hotkey(normalized)}", colors.success)
+            self._check_conflicts()
+            self.hotkey_changed.emit(self._hotkey_value)
         else:
-            self.status_text.value = "Need modifier + key (e.g., ctrl+alt+p)"
-            self.status_text.color = ft.Colors.ORANGE_700
-            self.status_text.visible = True
+            self._show_status("Need modifier + key (e.g., ctrl+alt+p)", colors.warning)
 
-        if self._mounted:
-            self.update()
+    def _on_test(self):
+        """Test the current hotkey."""
+        colors = self.theme_manager.colors
+        success, message = test_hotkey(self._hotkey_value)
 
-    def _update_display(self):
-        """Update the display text."""
-        self.hotkey_display.value = display_hotkey(self._hotkey_value)
-        self._check_conflicts()
-
-    def _on_record_click(self, e=None):
-        """Handle record button click."""
-        if self.is_recording:
-            self._stop_recording()
+        if success:
+            self._show_status(f"✓ {message}", colors.success)
         else:
-            self._start_recording()
+            self._show_status(f"✗ {message}", colors.error)
 
-    def _start_recording(self):
-        """Start recording keyboard input."""
-        if not self.page:
-            return
-
-        self.is_recording = True
-        self.status_text.value = "⏺ Press your key combination... (Esc to cancel)"
-        self.status_text.color = ft.Colors.RED_700
-        self.status_text.visible = True
-        self.record_btn.text = "Cancel"
-        self.record_btn.icon = ft.Icons.CANCEL
-        self.record_btn.style = ft.ButtonStyle(
-            bgcolor={"": ft.Colors.ORANGE_700},
-            color={"": ft.Colors.WHITE},
-        )
-        self.hotkey_display.value = "..."
-
-        # Store original handler
-        self._original_keyboard_handler = self.page.on_keyboard_event
-
-        def on_keyboard(e: ft.KeyboardEvent):
-            if not self.is_recording:
-                return
-
-            # Debug: print the key event
-            print(f"[HotkeyRecorder] Key event: key={e.key}, ctrl={e.ctrl}, alt={e.alt}, shift={e.shift}")
-
-            # Escape cancels recording
-            if e.key == "Escape":
-                self._stop_recording()
-                self._update_display()
-                self.status_text.value = "Recording cancelled"
-                self.status_text.color = ft.Colors.GREY_700
-                if self._mounted:
-                    self.update()
-                return
-
-            # Skip if only modifier keys pressed
-            if e.key in MODIFIER_ONLY_KEYS:
-                return
-
-            # Build hotkey string in pynput format
-            parts = []
-            if e.ctrl:
-                parts.append("<ctrl>")
-            if e.alt:
-                parts.append("<alt>")
-            if e.shift:
-                parts.append("<shift>")
-            if e.meta:
-                parts.append("<cmd>")
-
-            # Add the main key
-            key = self._normalize_key(e.key)
-            if key:
-                parts.append(key)
-
-            # Need at least one modifier + one key
-            if len(parts) >= 2:
-                self._hotkey_value = "+".join(parts)
-                self._stop_recording()
-                self._update_display()
-
-                # Show success message
-                self.status_text.value = f"✓ Recorded: {display_hotkey(self._hotkey_value)}"
-                self.status_text.color = ft.Colors.GREEN_700
-                self.status_text.visible = True
-
-                if self.on_change_callback:
-                    self.on_change_callback(self._hotkey_value)
-
-                if self._mounted:
-                    self.update()
-            else:
-                # Show hint if only one key pressed
-                self.status_text.value = "Need modifier + key (e.g., Ctrl+Alt+P)"
-                self.status_text.color = ft.Colors.ORANGE_700
-                if self._mounted:
-                    self.update()
-
-        self.page.on_keyboard_event = on_keyboard
-
-        if self._mounted:
-            self.update()
-
-    def _stop_recording(self):
-        """Stop recording keyboard input."""
-        self.is_recording = False
-        self.record_btn.text = "Record"
-        self.record_btn.icon = ft.Icons.FIBER_MANUAL_RECORD
-        self.record_btn.style = ft.ButtonStyle(
-            bgcolor={"": ft.Colors.BLUE_700},
-            color={"": ft.Colors.WHITE},
-        )
-
-        # Restore original handler
-        if self.page and self._original_keyboard_handler is not None:
-            self.page.on_keyboard_event = self._original_keyboard_handler
-        elif self.page:
-            self.page.on_keyboard_event = None
-        self._original_keyboard_handler = None
-
-        if self._mounted:
-            self.update()
-
-    def _normalize_key(self, key: str) -> str:
-        """Normalize key name to pynput format."""
-        # Map Flet key names to pynput format
-        key_map = {
-            " ": "<space>",
-            "Escape": "<esc>",
-            "Enter": "<enter>",
-            "Tab": "<tab>",
-            "Backspace": "<backspace>",
-            "Delete": "<delete>",
-            "Insert": "<insert>",
-            "Home": "<home>",
-            "End": "<end>",
-            "Page Up": "<page_up>",
-            "Page Down": "<page_down>",
-            "Arrow Up": "<up>",
-            "Arrow Down": "<down>",
-            "Arrow Left": "<left>",
-            "Arrow Right": "<right>",
-            "F1": "<f1>", "F2": "<f2>", "F3": "<f3>", "F4": "<f4>",
-            "F5": "<f5>", "F6": "<f6>", "F7": "<f7>", "F8": "<f8>",
-            "F9": "<f9>", "F10": "<f10>", "F11": "<f11>", "F12": "<f12>",
-        }
-
-        if key in key_map:
-            return key_map[key]
-
-        # Single character key - lowercase
-        if len(key) == 1:
-            return key.lower()
-
-        # Other keys - lowercase, no spaces
-        return key.lower().replace(" ", "")
-
-    def _reset_to_default(self, e=None):
-        """Reset to the default hotkey."""
+    def _on_reset(self):
+        """Reset to default hotkey."""
         if self.is_recording:
             self._stop_recording()
 
         self._hotkey_value = DEFAULT_HOTKEY
-        self._update_display()
-
-        self.status_text.value = f"Reset to default: {display_hotkey(DEFAULT_HOTKEY)}"
-        self.status_text.color = ft.Colors.BLUE_700
-        self.status_text.visible = True
-
-        if self.on_change_callback:
-            self.on_change_callback(self._hotkey_value)
-
-        if self._mounted:
-            self.update()
-
-    def _on_test_click(self, e=None):
-        """Test if the current hotkey is valid."""
-        success, message = test_hotkey(self._hotkey_value)
-
-        if success:
-            self.status_text.value = f"✓ {message}"
-            self.status_text.color = ft.Colors.GREEN_700
-        else:
-            self.status_text.value = f"✗ {message}"
-            self.status_text.color = ft.Colors.RED_700
-
-        self.status_text.visible = True
-
-        if self._mounted:
-            self.update()
+        self.hotkey_display.setText(display_hotkey(DEFAULT_HOTKEY))
+        colors = self.theme_manager.colors
+        self._show_status(f"Reset to default: {display_hotkey(DEFAULT_HOTKEY)}", colors.info)
+        self._check_conflicts()
+        self.hotkey_changed.emit(self._hotkey_value)
 
     def _check_conflicts(self):
         """Check for conflicts with system shortcuts."""
         if not self._hotkey_value:
             return
 
-        # Check against known system shortcuts
         normalized = normalize_hotkey(self._hotkey_value)
         if normalized in SYSTEM_SHORTCUTS:
             conflict = SYSTEM_SHORTCUTS[normalized]
-            self.status_text.value = f"⚠ May conflict with: {conflict}"
-            self.status_text.color = ft.Colors.ORANGE_700
-            self.status_text.visible = True
-        # Don't hide - let other operations control visibility
+            colors = self.theme_manager.colors
+            self._show_status(f"⚠ May conflict with: {conflict}", colors.warning)
+
+    def _show_status(self, message: str, color: str):
+        """Show status message."""
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {color};
+                font-size: 11px;
+                background: transparent;
+            }}
+        """
+        )
+        self.status_label.setVisible(True)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle key press events during recording."""
+        if not self.is_recording:
+            super().keyPressEvent(event)
+            return
+
+        # Escape cancels recording
+        if event.key() == Qt.Key.Key_Escape:
+            self._stop_recording()
+            return
+
+        # Build hotkey string
+        parts = []
+        modifiers = event.modifiers()
+
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            parts.append("<ctrl>")
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            parts.append("<alt>")
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            parts.append("<shift>")
+        if modifiers & Qt.KeyboardModifier.MetaModifier:
+            parts.append("<cmd>")
+
+        # Get key name
+        key = self._normalize_key(event.key(), event.text())
+        if key:
+            parts.append(key)
+
+        # Need at least modifier + key
+        if len(parts) >= 2:
+            self._hotkey_value = "+".join(parts)
+            self._stop_recording()
+            self.hotkey_display.setText(display_hotkey(self._hotkey_value))
+            colors = self.theme_manager.colors
+            self._show_status(f"✓ Recorded: {display_hotkey(self._hotkey_value)}", colors.success)
+            self._check_conflicts()
+            self.hotkey_changed.emit(self._hotkey_value)
+
+    def _normalize_key(self, key_code: int, key_text: str) -> str:
+        """Normalize Qt key to pynput format."""
+        # Special keys
+        key_map = {
+            Qt.Key.Key_Space: "<space>",
+            Qt.Key.Key_Return: "<enter>",
+            Qt.Key.Key_Enter: "<enter>",
+            Qt.Key.Key_Tab: "<tab>",
+            Qt.Key.Key_Backspace: "<backspace>",
+            Qt.Key.Key_Delete: "<delete>",
+            Qt.Key.Key_Escape: "<esc>",
+            Qt.Key.Key_F1: "<f1>",
+            Qt.Key.Key_F2: "<f2>",
+            Qt.Key.Key_F3: "<f3>",
+            Qt.Key.Key_F4: "<f4>",
+            Qt.Key.Key_F5: "<f5>",
+            Qt.Key.Key_F6: "<f6>",
+            Qt.Key.Key_F7: "<f7>",
+            Qt.Key.Key_F8: "<f8>",
+            Qt.Key.Key_F9: "<f9>",
+            Qt.Key.Key_F10: "<f10>",
+            Qt.Key.Key_F11: "<f11>",
+            Qt.Key.Key_F12: "<f12>",
+        }
+
+        if key_code in key_map:
+            return key_map[key_code]
+
+        # Regular character
+        if key_text and len(key_text) == 1 and key_text.isprintable():
+            return key_text.lower()
+
+        return ""

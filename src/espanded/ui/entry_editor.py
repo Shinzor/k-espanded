@@ -1,15 +1,31 @@
-"""Entry editor component for creating and editing entries."""
+"""Entry editor panel for creating and editing entries."""
 
-import flet as ft
-from typing import Callable
 from uuid import uuid4
 
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QTextEdit,
+    QComboBox,
+    QCheckBox,
+    QFrame,
+    QScrollArea,
+    QMessageBox,
+    QMenu,
+)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QTextCursor
+
 from espanded.ui.theme import ThemeManager
-from espanded.ui.components.autocomplete import VARIABLE_CATEGORIES
+from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
 
 
-# Available trigger prefixes
+# Trigger prefix options
 TRIGGER_PREFIXES = [
     (":", "Colon (default)"),
     (";", "Semicolon"),
@@ -18,454 +34,657 @@ TRIGGER_PREFIXES = [
     ("", "None (blank)"),
 ]
 
+# Variable categories for insertion
+VARIABLE_ITEMS = [
+    ("Date & Time", [
+        ("{{date}}", "Current date"),
+        ("{{date:%Y-%m-%d}}", "Custom date format"),
+        ("{{time}}", "Current time"),
+        ("{{time:%H:%M}}", "Custom time format"),
+    ]),
+    ("Clipboard", [
+        ("{{clipboard}}", "Clipboard content"),
+    ]),
+    ("Random", [
+        ("{{random:uuid}}", "Random UUID"),
+        ("{{random:chars:5}}", "Random characters"),
+        ("{{random:alnum:5}}", "Random alphanumeric"),
+        ("{{random:num:5}}", "Random numbers"),
+    ]),
+    ("Forms", [
+        ("{{form1}}", "Simple form field"),
+        ("{{form1:default=value}}", "Form with default"),
+    ]),
+    ("Cursor", [
+        ("$|$", "Cursor position"),
+    ]),
+]
 
-class EntryEditor(ft.Container):
-    """Editor for creating and modifying entries."""
 
-    def __init__(
-        self,
-        theme: ThemeManager,
-        on_save: Callable[[Entry], None],
-        on_delete: Callable[[Entry], None],
-        on_clone: Callable[[Entry], None],
-        on_close: Callable[[], None],
-    ):
-        super().__init__()
-        self.theme = theme
-        self.on_save = on_save
-        self.on_delete = on_delete
-        self.on_clone = on_clone
-        self.on_close = on_close
+class EntryEditor(QWidget):
+    """Entry editor panel for creating and editing entries."""
+
+    # Signals
+    entry_saved = Signal(object)  # Emits Entry object
+    entry_deleted = Signal(object)  # Emits Entry object
+    entry_cloned = Signal(object)  # Emits Entry object
+    close_requested = Signal()
+
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.theme_manager = theme_manager
+        self.app_state = get_app_state()
 
         self.current_entry: Entry | None = None
         self.is_new: bool = True
-        self._mounted = False
 
-        self._build()
+        self._setup_ui()
 
-    def did_mount(self):
-        """Called when control is added to page."""
-        self._mounted = True
+    def _setup_ui(self):
+        """Build the entry editor layout."""
+        colors = self.theme_manager.colors
 
-    def will_unmount(self):
-        """Called when control is removed from page."""
-        self._mounted = False
-
-    def _build(self):
-        """Build the editor layout."""
-        colors = self.theme.colors
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Header
-        self.header_text = ft.Text(
-            "New Entry",
-            size=18,
-            weight=ft.FontWeight.W_600,
-            color=colors.text_primary,
-        )
+        header = self._create_header()
+        layout.addWidget(header)
 
-        header = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Icon(ft.Icons.EDIT_OUTLINED, size=20, color=colors.primary),
-                            self.header_text,
-                        ],
-                        spacing=10,
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_color=colors.text_secondary,
-                        tooltip="Close",
-                        on_click=lambda e: self.on_close(),
-                    ),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            margin=ft.margin.only(bottom=20),
-        )
-
-        # Trigger field with prefix dropdown
-        self.prefix_dropdown = ft.Dropdown(
-            value=":",
-            options=[
-                ft.dropdown.Option(key=prefix, text=prefix if prefix else "(none)")
-                for prefix, _ in TRIGGER_PREFIXES
-            ],
-            width=80,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_muted,
-            focused_border_color=colors.primary,
-            text_style=ft.TextStyle(color=colors.text_primary),
-            content_padding=ft.padding.symmetric(horizontal=12, vertical=8),
-        )
-
-        self.trigger_field = ft.TextField(
-            hint_text="Enter trigger text...",
-            border_radius=8,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_muted,
-            focused_border_color=colors.primary,
-            text_style=ft.TextStyle(color=colors.text_primary),
-            hint_style=ft.TextStyle(color=colors.text_tertiary),
-            expand=True,
-        )
-
-        trigger_row = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Text("Trigger", size=13, weight=ft.FontWeight.W_500, color=colors.text_secondary),
-                    ft.Row(
-                        controls=[
-                            self.prefix_dropdown,
-                            self.trigger_field,
-                        ],
-                        spacing=8,
-                    ),
-                ],
-                spacing=6,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
-
-        # Replacement field with autocomplete
-        self.replacement_field = ft.TextField(
-            hint_text="Enter replacement text...\n\nType {{ to insert variables and forms",
-            multiline=True,
-            min_lines=5,
-            max_lines=10,
-            border_radius=8,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_muted,
-            focused_border_color=colors.primary,
-            text_style=ft.TextStyle(color=colors.text_primary),
-            hint_style=ft.TextStyle(color=colors.text_tertiary),
-            on_change=self._on_replacement_change,
-        )
-
-        # View source button
-        view_source_btn = ft.TextButton(
-            text="View Source",
-            icon=ft.Icons.CODE,
-            style=ft.ButtonStyle(color=colors.text_secondary),
-            on_click=self._on_view_source,
-        )
-
-        # Variable insert popup menu
-        insert_var_btn = ft.PopupMenuButton(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.DATA_OBJECT, size=16, color=colors.primary),
-                    ft.Text("Insert Variable", size=13, color=colors.primary),
-                ],
-                spacing=4,
-            ),
-            items=self._build_variable_menu_items(),
-        )
-
-        replacement_section = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Text("Replacement", size=13, weight=ft.FontWeight.W_500, color=colors.text_secondary),
-                            ft.Row(
-                                controls=[insert_var_btn, view_source_btn],
-                                spacing=0,
-                            ),
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    ),
-                    self.replacement_field,
-                ],
-                spacing=6,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
-
-        # Tags section
-        self.tags_row = ft.Row(
-            controls=[],
-            spacing=8,
-            wrap=True,
-        )
-
-        self.add_tag_field = ft.TextField(
-            hint_text="Add tag...",
-            width=120,
-            height=32,
-            border_radius=16,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_muted,
-            focused_border_color=colors.primary,
-            text_style=ft.TextStyle(color=colors.text_primary, size=12),
-            hint_style=ft.TextStyle(color=colors.text_tertiary, size=12),
-            content_padding=ft.padding.symmetric(horizontal=12, vertical=4),
-            on_submit=self._on_add_tag,
-        )
-
-        tags_section = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Text("Tags", size=13, weight=ft.FontWeight.W_500, color=colors.text_secondary),
-                    ft.Row(
-                        controls=[
-                            self.tags_row,
-                            self.add_tag_field,
-                        ],
-                        spacing=8,
-                        wrap=True,
-                    ),
-                ],
-                spacing=8,
-            ),
-            margin=ft.margin.only(bottom=16),
-        )
-
-        # Advanced options (collapsed by default)
-        self.advanced_expanded = False
-        self.advanced_section = self._build_advanced_options()
-
-        # Action buttons
-        self.delete_btn = ft.OutlinedButton(
-            text="Delete",
-            icon=ft.Icons.DELETE_OUTLINE,
-            style=ft.ButtonStyle(
-                color=colors.error,
-                side=ft.BorderSide(1, colors.error),
-            ),
-            on_click=self._on_delete_click,
-        )
-
-        self.clone_btn = ft.OutlinedButton(
-            text="Clone",
-            icon=ft.Icons.COPY,
-            style=ft.ButtonStyle(
-                color=colors.text_secondary,
-                side=ft.BorderSide(1, colors.border_default),
-            ),
-            on_click=self._on_clone_click,
-        )
-
-        self.save_btn = ft.ElevatedButton(
-            text="Save",
-            icon=ft.Icons.SAVE,
-            bgcolor=colors.primary,
-            color=colors.text_inverse,
-            on_click=self._on_save_click,
-        )
-
-        # Action buttons row - fixed at top
-        actions_row = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Row(
-                        controls=[self.delete_btn, self.clone_btn],
-                        spacing=8,
-                    ),
-                    self.save_btn,
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            padding=ft.padding.only(bottom=16),
-            border=ft.border.only(bottom=ft.BorderSide(1, colors.border_muted)),
-        )
+        # Action buttons row (fixed at top)
+        actions_row = self._create_action_buttons()
+        layout.addWidget(actions_row)
 
         # Scrollable form content
-        form_content = ft.Column(
-            controls=[
-                trigger_row,
-                replacement_section,
-                tags_section,
-                self.advanced_section,
-            ],
-            spacing=0,
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {colors.bg_base};
+                border: none;
+            }}
+        """)
 
-        # Main layout with fixed header/actions and scrollable form
-        self.content = ft.Column(
-            controls=[
-                header,
-                actions_row,
-                form_content,
-            ],
-            spacing=0,
-            expand=True,
-        )
+        form_content = self._create_form()
+        scroll.setWidget(form_content)
+        layout.addWidget(scroll, stretch=1)
 
-        self.expand = True
-        self.padding = 20
+    def _create_header(self) -> QWidget:
+        """Create editor header with title and close button."""
+        colors = self.theme_manager.colors
 
-    def _build_advanced_options(self) -> ft.Container:
-        """Build the advanced options expandable section."""
-        colors = self.theme.colors
+        header = QWidget()
+        header.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+            }}
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 20, 20, 0)
 
-        # Checkbox options
-        self.word_trigger_cb = ft.Checkbox(
-            label="Word trigger (expand at word boundaries)",
-            value=True,
-            fill_color=colors.primary,
-        )
+        # Icon and title
+        title_row = QWidget()
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(10)
 
-        self.propagate_case_cb = ft.Checkbox(
-            label="Propagate case (match input casing)",
-            value=False,
-            fill_color=colors.primary,
-        )
+        icon_label = QLabel("\u270F")  # Pencil emoji
+        icon_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 20px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(icon_label)
 
-        self.case_insensitive_cb = ft.Checkbox(
-            label="Case insensitive matching",
-            value=False,
-            fill_color=colors.primary,
-        )
+        self.header_text = QLabel("New Entry")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        self.header_text.setFont(title_font)
+        self.header_text.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        title_layout.addWidget(self.header_text)
 
-        self.force_clipboard_cb = ft.Checkbox(
-            label="Force clipboard paste",
-            value=False,
-            fill_color=colors.primary,
-        )
+        header_layout.addWidget(title_row)
+        header_layout.addStretch()
 
-        self.passive_cb = ft.Checkbox(
-            label="Passive mode (manual trigger only)",
-            value=False,
-            fill_color=colors.primary,
-        )
+        # Close button
+        close_btn = QPushButton("\u2715")  # X symbol
+        close_btn.setFixedSize(32, 32)
+        close_btn.clicked.connect(self.close_requested.emit)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_elevated};
+            }}
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(close_btn)
 
-        self.regex_cb = ft.Checkbox(
-            label="Regex trigger",
-            value=False,
-            fill_color=colors.primary,
-        )
+        return header
 
-        # Filter apps field
-        self.filter_apps_field = ft.TextField(
-            hint_text="chrome, slack, vscode (comma-separated)",
-            border_radius=8,
-            bgcolor=colors.bg_surface,
-            border_color=colors.border_muted,
-            focused_border_color=colors.primary,
-            text_style=ft.TextStyle(color=colors.text_primary, size=13),
-            hint_style=ft.TextStyle(color=colors.text_tertiary, size=13),
-        )
+    def _create_action_buttons(self) -> QWidget:
+        """Create action buttons row."""
+        colors = self.theme_manager.colors
 
-        # Expandable content
-        self.advanced_content = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Text(
-                        "Trigger Settings",
-                        size=12,
-                        weight=ft.FontWeight.W_500,
-                        color=colors.text_tertiary,
-                    ),
-                    self.word_trigger_cb,
-                    self.propagate_case_cb,
-                    ft.Container(height=8),
-                    ft.Text(
-                        "Matching",
-                        size=12,
-                        weight=ft.FontWeight.W_500,
-                        color=colors.text_tertiary,
-                    ),
-                    self.regex_cb,
-                    self.case_insensitive_cb,
-                    ft.Container(height=8),
-                    ft.Text(
-                        "Behavior",
-                        size=12,
-                        weight=ft.FontWeight.W_500,
-                        color=colors.text_tertiary,
-                    ),
-                    self.force_clipboard_cb,
-                    self.passive_cb,
-                    ft.Container(height=8),
-                    ft.Text(
-                        "App Filtering",
-                        size=12,
-                        weight=ft.FontWeight.W_500,
-                        color=colors.text_tertiary,
-                    ),
-                    self.filter_apps_field,
-                ],
-                spacing=4,
-            ),
-            padding=ft.padding.only(left=16, top=8, bottom=8),
-            visible=False,
-        )
+        actions = QWidget()
+        actions.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.bg_base};
+                border-bottom: 1px solid {colors.border_muted};
+            }}
+        """)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(20, 16, 20, 16)
 
-        # Header row with toggle icon stored as class attribute
-        self.advanced_toggle_icon = ft.Icon(
-            ft.Icons.KEYBOARD_ARROW_RIGHT,
-            size=18,
-            color=colors.text_secondary,
-        )
+        # Left side buttons (Delete, Clone)
+        left_buttons = QWidget()
+        left_layout = QHBoxLayout(left_buttons)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
 
-        header_row = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.advanced_toggle_icon,
-                    ft.Text(
-                        "Advanced Options",
-                        size=13,
-                        weight=ft.FontWeight.W_500,
-                        color=colors.text_secondary,
-                    ),
-                ],
-                spacing=4,
-            ),
-            on_click=self._toggle_advanced,
-            padding=ft.padding.symmetric(vertical=8),
-            ink=True,
-        )
+        self.delete_btn = QPushButton("\u1F5D1 Delete")
+        self.delete_btn.clicked.connect(self._on_delete_click)
+        self.delete_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.error};
+                border: 1px solid {colors.error};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.error};
+                color: {colors.text_inverse};
+            }}
+        """)
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        left_layout.addWidget(self.delete_btn)
 
-        return ft.Container(
-            content=ft.Column(
-                controls=[
-                    header_row,
-                    self.advanced_content,
-                ],
-                spacing=0,
-            ),
-            border=ft.border.only(top=ft.BorderSide(1, colors.border_muted)),
-            padding=ft.padding.only(top=8),
-        )
+        self.clone_btn = QPushButton("\u2398 Clone")
+        self.clone_btn.clicked.connect(self._on_clone_click)
+        self.clone_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_elevated};
+                border-color: {colors.primary};
+            }}
+        """)
+        self.clone_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        left_layout.addWidget(self.clone_btn)
 
-    def _toggle_advanced(self, e=None):
+        actions_layout.addWidget(left_buttons)
+        actions_layout.addStretch()
+
+        # Save button
+        self.save_btn = QPushButton("\u1F4BE Save")
+        self.save_btn.clicked.connect(self._on_save_click)
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 24px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """)
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        actions_layout.addWidget(self.save_btn)
+
+        return actions
+
+    def _create_form(self) -> QWidget:
+        """Create the entry form."""
+        colors = self.theme_manager.colors
+
+        form = QWidget()
+        form_layout = QVBoxLayout(form)
+        form_layout.setContentsMargins(20, 16, 20, 20)
+        form_layout.setSpacing(16)
+
+        # Trigger section
+        trigger_section = self._create_trigger_section()
+        form_layout.addWidget(trigger_section)
+
+        # Replacement section
+        replacement_section = self._create_replacement_section()
+        form_layout.addWidget(replacement_section)
+
+        # Tags section
+        tags_section = self._create_tags_section()
+        form_layout.addWidget(tags_section)
+
+        # Advanced options (collapsible)
+        self.advanced_section = self._create_advanced_section()
+        form_layout.addWidget(self.advanced_section)
+
+        form_layout.addStretch()
+
+        return form
+
+    def _create_trigger_section(self) -> QWidget:
+        """Create trigger input section."""
+        colors = self.theme_manager.colors
+
+        section = QWidget()
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(6)
+
+        # Label
+        label = QLabel("Trigger")
+        label_font = QFont()
+        label_font.setPointSize(10)
+        label_font.setBold(True)
+        label.setFont(label_font)
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        section_layout.addWidget(label)
+
+        # Prefix dropdown and trigger input
+        input_row = QWidget()
+        input_layout = QHBoxLayout(input_row)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(8)
+
+        self.prefix_dropdown = QComboBox()
+        for prefix, display in TRIGGER_PREFIXES:
+            self.prefix_dropdown.addItem(display if prefix else "(none)", prefix)
+        self.prefix_dropdown.setCurrentIndex(0)  # Default to ":"
+        self.prefix_dropdown.setFixedWidth(140)
+        input_layout.addWidget(self.prefix_dropdown)
+
+        self.trigger_field = QLineEdit()
+        self.trigger_field.setPlaceholderText("Enter trigger text...")
+        input_layout.addWidget(self.trigger_field, stretch=1)
+
+        section_layout.addWidget(input_row)
+
+        return section
+
+    def _create_replacement_section(self) -> QWidget:
+        """Create replacement text section."""
+        colors = self.theme_manager.colors
+
+        section = QWidget()
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(6)
+
+        # Header with label and buttons
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        label = QLabel("Replacement")
+        label_font = QFont()
+        label_font.setPointSize(10)
+        label_font.setBold(True)
+        label.setFont(label_font)
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(label)
+        header_layout.addStretch()
+
+        # Insert variable button
+        insert_var_btn = QPushButton("\u007B\u007B Insert Variable")
+        insert_var_btn.clicked.connect(self._show_variable_menu)
+        insert_var_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.primary};
+                border: none;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                text-decoration: underline;
+            }}
+        """)
+        insert_var_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(insert_var_btn)
+
+        section_layout.addWidget(header)
+
+        # Text editor
+        self.replacement_field = QTextEdit()
+        self.replacement_field.setPlaceholderText("Enter replacement text...\n\nType {{ to insert variables and forms")
+        self.replacement_field.setMinimumHeight(120)
+        self.replacement_field.setMaximumHeight(200)
+        font = QFont("Consolas, Monaco, monospace")
+        font.setPointSize(10)
+        self.replacement_field.setFont(font)
+        section_layout.addWidget(self.replacement_field)
+
+        return section
+
+    def _create_tags_section(self) -> QWidget:
+        """Create tags input section."""
+        colors = self.theme_manager.colors
+
+        section = QWidget()
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(8)
+
+        # Label
+        label = QLabel("Tags")
+        label_font = QFont()
+        label_font.setPointSize(10)
+        label_font.setBold(True)
+        label.setFont(label_font)
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        section_layout.addWidget(label)
+
+        # Tags display and input
+        tags_row = QWidget()
+        tags_layout = QHBoxLayout(tags_row)
+        tags_layout.setContentsMargins(0, 0, 0, 0)
+        tags_layout.setSpacing(8)
+
+        # Tags container (will hold tag chips)
+        self.tags_container = QWidget()
+        self.tags_layout = QHBoxLayout(self.tags_container)
+        self.tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.tags_layout.setSpacing(4)
+        self.tags_layout.addStretch()
+        tags_layout.addWidget(self.tags_container, stretch=1)
+
+        # Add tag input
+        self.add_tag_field = QLineEdit()
+        self.add_tag_field.setPlaceholderText("Add tag...")
+        self.add_tag_field.setFixedWidth(120)
+        self.add_tag_field.returnPressed.connect(self._on_add_tag)
+        tags_layout.addWidget(self.add_tag_field)
+
+        section_layout.addWidget(tags_row)
+
+        return section
+
+    def _create_advanced_section(self) -> QWidget:
+        """Create advanced options section (collapsible)."""
+        colors = self.theme_manager.colors
+
+        section = QWidget()
+        section.setStyleSheet(f"""
+            QWidget {{
+                border-top: 1px solid {colors.border_muted};
+                padding-top: 8px;
+            }}
+        """)
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(0, 8, 0, 0)
+        section_layout.setSpacing(0)
+
+        # Toggle header
+        self.advanced_toggle = QPushButton("\u25B6 Advanced Options")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.clicked.connect(self._toggle_advanced)
+        self.advanced_toggle.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                text-align: left;
+                padding: 8px 0px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                color: {colors.text_primary};
+            }}
+        """)
+        self.advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        section_layout.addWidget(self.advanced_toggle)
+
+        # Advanced content (hidden by default)
+        self.advanced_content = QWidget()
+        self.advanced_content.setVisible(False)
+        content_layout = QVBoxLayout(self.advanced_content)
+        content_layout.setContentsMargins(16, 8, 0, 0)
+        content_layout.setSpacing(6)
+
+        # Trigger Settings
+        trigger_label = QLabel("Trigger Settings")
+        trigger_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                font-weight: 500;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(trigger_label)
+
+        self.word_trigger_cb = QCheckBox("Word trigger (expand at word boundaries)")
+        self.word_trigger_cb.setChecked(True)
+        content_layout.addWidget(self.word_trigger_cb)
+
+        self.propagate_case_cb = QCheckBox("Propagate case (match input casing)")
+        content_layout.addWidget(self.propagate_case_cb)
+
+        # Matching
+        matching_label = QLabel("Matching")
+        matching_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                font-weight: 500;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+                margin-top: 8px;
+            }}
+        """)
+        content_layout.addWidget(matching_label)
+
+        self.regex_cb = QCheckBox("Regex trigger")
+        content_layout.addWidget(self.regex_cb)
+
+        self.case_insensitive_cb = QCheckBox("Case insensitive matching")
+        content_layout.addWidget(self.case_insensitive_cb)
+
+        # Behavior
+        behavior_label = QLabel("Behavior")
+        behavior_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                font-weight: 500;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+                margin-top: 8px;
+            }}
+        """)
+        content_layout.addWidget(behavior_label)
+
+        self.force_clipboard_cb = QCheckBox("Force clipboard paste")
+        content_layout.addWidget(self.force_clipboard_cb)
+
+        self.passive_cb = QCheckBox("Passive mode (manual trigger only)")
+        content_layout.addWidget(self.passive_cb)
+
+        # App Filtering
+        filtering_label = QLabel("App Filtering")
+        filtering_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                font-weight: 500;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+                margin-top: 8px;
+            }}
+        """)
+        content_layout.addWidget(filtering_label)
+
+        self.filter_apps_field = QLineEdit()
+        self.filter_apps_field.setPlaceholderText("chrome, slack, vscode (comma-separated)")
+        content_layout.addWidget(self.filter_apps_field)
+
+        section_layout.addWidget(self.advanced_content)
+
+        return section
+
+    def _toggle_advanced(self):
         """Toggle advanced options visibility."""
-        self.advanced_expanded = not self.advanced_expanded
-        self.advanced_content.visible = self.advanced_expanded
-        self.advanced_toggle_icon.name = ft.Icons.KEYBOARD_ARROW_DOWN if self.advanced_expanded else ft.Icons.KEYBOARD_ARROW_RIGHT
-        if self._mounted:
-            self.update()
+        is_visible = self.advanced_content.isVisible()
+        self.advanced_content.setVisible(not is_visible)
+        icon = "\u25BC" if not is_visible else "\u25B6"
+        self.advanced_toggle.setText(f"{icon} Advanced Options")
 
-    def _build_tag_chip(self, tag: str) -> ft.Container:
-        """Build a tag chip."""
-        colors = self.theme.colors
+    def _show_variable_menu(self):
+        """Show variable insertion menu."""
+        colors = self.theme_manager.colors
 
-        return ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Text(tag, size=12, color=colors.tag_text),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_size=14,
-                        icon_color=colors.tag_text,
-                        tooltip="Remove tag",
-                        on_click=lambda e, t=tag: self._on_remove_tag(t),
-                        padding=0,
-                        width=20,
-                        height=20,
-                    ),
-                ],
-                spacing=4,
-                tight=True,
-            ),
-            bgcolor=colors.tag_bg,
-            padding=ft.padding.only(left=10, right=4, top=4, bottom=4),
-            border_radius=16,
-        )
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 8px 16px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {colors.entry_selected};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {colors.border_muted};
+                margin: 4px 8px;
+            }}
+        """)
+
+        for category_name, items in VARIABLE_ITEMS:
+            # Category header (disabled)
+            header = menu.addAction(category_name)
+            header.setEnabled(False)
+
+            # Category items
+            for value, label in items:
+                action = menu.addAction(f"  {label}")
+                action.triggered.connect(lambda checked=False, v=value: self._insert_variable(v))
+
+            menu.addSeparator()
+
+        menu.exec(self.sender().mapToGlobal(self.sender().rect().bottomLeft()))
+
+    def _insert_variable(self, variable: str):
+        """Insert variable at cursor position."""
+        cursor = self.replacement_field.textCursor()
+        cursor.insertText(variable)
+        self.replacement_field.setFocus()
+
+    def _on_add_tag(self):
+        """Add a tag chip."""
+        tag = self.add_tag_field.text().strip()
+        if tag and tag not in self._get_current_tags():
+            self._add_tag_chip(tag)
+            self.add_tag_field.clear()
+
+    def _add_tag_chip(self, tag: str):
+        """Add a tag chip to the container."""
+        colors = self.theme_manager.colors
+
+        chip = QWidget()
+        chip.setProperty("tag", tag)
+        chip.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.tag_bg};
+                border-radius: 12px;
+                padding: 4px 8px;
+            }}
+        """)
+        chip_layout = QHBoxLayout(chip)
+        chip_layout.setContentsMargins(8, 4, 4, 4)
+        chip_layout.setSpacing(4)
+
+        tag_label = QLabel(tag)
+        tag_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.tag_text};
+                background-color: transparent;
+            }}
+        """)
+        chip_layout.addWidget(tag_label)
+
+        remove_btn = QPushButton("\u2715")
+        remove_btn.setFixedSize(16, 16)
+        remove_btn.clicked.connect(lambda: self._remove_tag_chip(chip))
+        remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.tag_text};
+                border: none;
+                font-size: 10px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                color: {colors.text_primary};
+            }}
+        """)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        chip_layout.addWidget(remove_btn)
+
+        # Insert before stretch
+        self.tags_layout.insertWidget(self.tags_layout.count() - 1, chip)
+
+    def _remove_tag_chip(self, chip: QWidget):
+        """Remove a tag chip."""
+        self.tags_layout.removeWidget(chip)
+        chip.deleteLater()
+
+    def _get_current_tags(self) -> list[str]:
+        """Get current tags from chips."""
+        tags = []
+        for i in range(self.tags_layout.count()):
+            widget = self.tags_layout.itemAt(i).widget()
+            if widget and widget.property("tag"):
+                tags.append(widget.property("tag"))
+        return tags
 
     def set_entry(self, entry: Entry | None):
         """Set the entry to edit."""
@@ -473,255 +692,124 @@ class EntryEditor(ft.Container):
         self.is_new = entry is None or not entry.id
 
         if entry:
-            self.header_text.value = "Edit Entry"
-            self.prefix_dropdown.value = entry.prefix
-            self.trigger_field.value = entry.trigger
-            self.replacement_field.value = entry.replacement
+            # Edit mode
+            self.header_text.setText("Edit Entry")
 
-            # Set tags
-            self.tags_row.controls.clear()
+            # Set prefix
+            for i in range(self.prefix_dropdown.count()):
+                if self.prefix_dropdown.itemData(i) == entry.prefix:
+                    self.prefix_dropdown.setCurrentIndex(i)
+                    break
+
+            # Set fields
+            self.trigger_field.setText(entry.trigger)
+            self.replacement_field.setPlainText(entry.replacement)
+
+            # Clear and set tags
+            while self.tags_layout.count() > 1:  # Keep stretch
+                item = self.tags_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
             for tag in entry.tags:
-                self.tags_row.controls.append(self._build_tag_chip(tag))
+                self._add_tag_chip(tag)
 
             # Set advanced options
-            self.word_trigger_cb.value = entry.word
-            self.propagate_case_cb.value = entry.propagate_case
-            self.regex_cb.value = entry.regex
-            self.case_insensitive_cb.value = entry.case_insensitive
-            self.force_clipboard_cb.value = entry.force_clipboard
-            self.passive_cb.value = entry.passive
+            self.word_trigger_cb.setChecked(entry.word)
+            self.propagate_case_cb.setChecked(entry.propagate_case)
+            self.regex_cb.setChecked(entry.regex)
+            self.case_insensitive_cb.setChecked(entry.case_insensitive)
+            self.force_clipboard_cb.setChecked(entry.force_clipboard)
+            self.passive_cb.setChecked(entry.passive)
 
             if entry.filter_apps:
-                self.filter_apps_field.value = ", ".join(entry.filter_apps)
+                self.filter_apps_field.setText(", ".join(entry.filter_apps))
             else:
-                self.filter_apps_field.value = ""
+                self.filter_apps_field.clear()
 
             # Show delete/clone buttons
-            self.delete_btn.visible = True
-            self.clone_btn.visible = True
+            self.delete_btn.setVisible(True)
+            self.clone_btn.setVisible(True)
         else:
-            self.header_text.value = "New Entry"
-            self.prefix_dropdown.value = ":"
-            self.trigger_field.value = ""
-            self.replacement_field.value = ""
-            self.tags_row.controls.clear()
+            # New entry mode
+            self.header_text.setText("New Entry")
+            self.prefix_dropdown.setCurrentIndex(0)
+            self.trigger_field.clear()
+            self.replacement_field.clear()
+
+            # Clear tags
+            while self.tags_layout.count() > 1:
+                item = self.tags_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
             # Reset advanced options
-            self.word_trigger_cb.value = True
-            self.propagate_case_cb.value = False
-            self.regex_cb.value = False
-            self.case_insensitive_cb.value = False
-            self.force_clipboard_cb.value = False
-            self.passive_cb.value = False
-            self.filter_apps_field.value = ""
+            self.word_trigger_cb.setChecked(True)
+            self.propagate_case_cb.setChecked(False)
+            self.regex_cb.setChecked(False)
+            self.case_insensitive_cb.setChecked(False)
+            self.force_clipboard_cb.setChecked(False)
+            self.passive_cb.setChecked(False)
+            self.filter_apps_field.clear()
 
-            # Hide delete/clone buttons for new entry
-            self.delete_btn.visible = False
-            self.clone_btn.visible = False
-
-        # Only update if mounted
-        if self._mounted:
-            self.update()
-
-    def _get_current_tags(self) -> list[str]:
-        """Get current tags from the UI."""
-        tags = []
-        for control in self.tags_row.controls:
-            if isinstance(control, ft.Container):
-                row = control.content
-                if isinstance(row, ft.Row) and row.controls:
-                    text = row.controls[0]
-                    if isinstance(text, ft.Text):
-                        tags.append(text.value)
-        return tags
-
-    def _on_add_tag(self, e):
-        """Handle adding a new tag."""
-        tag = e.control.value.strip()
-        if tag and tag not in self._get_current_tags():
-            self.tags_row.controls.append(self._build_tag_chip(tag))
-        e.control.value = ""
-        if self._mounted:
-            self.update()
-
-    def _on_remove_tag(self, tag: str):
-        """Handle removing a tag."""
-        for control in self.tags_row.controls[:]:
-            if isinstance(control, ft.Container):
-                row = control.content
-                if isinstance(row, ft.Row) and row.controls:
-                    text = row.controls[0]
-                    if isinstance(text, ft.Text) and text.value == tag:
-                        self.tags_row.controls.remove(control)
-                        break
-        if self._mounted:
-            self.update()
+            # Hide delete/clone buttons
+            self.delete_btn.setVisible(False)
+            self.clone_btn.setVisible(False)
 
     def _build_entry_from_form(self) -> Entry | None:
-        """Build an Entry object from form values."""
-        trigger = self.trigger_field.value.strip() if self.trigger_field.value else ""
+        """Build Entry object from form values."""
+        trigger = self.trigger_field.text().strip()
         if not trigger:
             return None
 
+        prefix = self.prefix_dropdown.currentData()
+        replacement = self.replacement_field.toPlainText()
+        tags = self._get_current_tags()
+
         filter_apps = None
-        if self.filter_apps_field.value:
-            filter_apps = [a.strip() for a in self.filter_apps_field.value.split(",") if a.strip()]
+        filter_apps_text = self.filter_apps_field.text().strip()
+        if filter_apps_text:
+            filter_apps = [a.strip() for a in filter_apps_text.split(",") if a.strip()]
+
+        entry_id = self.current_entry.id if self.current_entry and self.current_entry.id else str(uuid4())
 
         return Entry(
-            id=self.current_entry.id if self.current_entry and self.current_entry.id else str(uuid4()),
+            id=entry_id,
             trigger=trigger,
-            prefix=self.prefix_dropdown.value,
-            replacement=self.replacement_field.value,
-            tags=self._get_current_tags(),
-            word=self.word_trigger_cb.value,
-            propagate_case=self.propagate_case_cb.value,
-            regex=self.regex_cb.value,
-            case_insensitive=self.case_insensitive_cb.value,
-            force_clipboard=self.force_clipboard_cb.value,
-            passive=self.passive_cb.value,
+            prefix=prefix,
+            replacement=replacement,
+            tags=tags,
+            word=self.word_trigger_cb.isChecked(),
+            propagate_case=self.propagate_case_cb.isChecked(),
+            regex=self.regex_cb.isChecked(),
+            case_insensitive=self.case_insensitive_cb.isChecked(),
+            force_clipboard=self.force_clipboard_cb.isChecked(),
+            passive=self.passive_cb.isChecked(),
             filter_apps=filter_apps,
         )
 
-    def _on_save_click(self, e):
+    def _on_save_click(self):
         """Handle save button click."""
         entry = self._build_entry_from_form()
         if not entry:
-            # Show error if trigger is empty
-            if self.page:
-                colors = self.theme.colors
-                self.page.snack_bar = ft.SnackBar(
-                    content=ft.Text("Trigger is required", color=colors.text_primary),
-                    bgcolor=colors.error,
-                    duration=2000,
-                )
-                self.page.snack_bar.open = True
-                self.page.update()
+            QMessageBox.warning(self, "Validation Error", "Trigger is required")
             return
-        self.on_save(entry)
 
-    def _on_delete_click(self, e):
+        self.entry_saved.emit(entry)
+
+    def _on_delete_click(self):
         """Handle delete button click."""
         if self.current_entry:
-            self.on_delete(self.current_entry)
+            reply = QMessageBox.question(
+                self,
+                "Confirm Delete",
+                f"Are you sure you want to delete '{self.current_entry.full_trigger}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.entry_deleted.emit(self.current_entry)
 
-    def _on_clone_click(self, e):
+    def _on_clone_click(self):
         """Handle clone button click."""
         if self.current_entry:
-            self.on_clone(self.current_entry)
-
-    def _on_view_source(self, e):
-        """Handle view source button click - show YAML source dialog."""
-        if not self.page:
-            return
-
-        colors = self.theme.colors
-
-        # Build entry from current form values
-        entry = self._build_entry_from_form()
-        if not entry:
-            return
-
-        # Convert to YAML
-        from espanded.core.yaml_handler import YAMLHandler
-        handler = YAMLHandler()
-        yaml_source = handler.export_to_yaml(entry)
-
-        def close_dialog(e):
-            dialog.open = False
-            self.page.update()
-
-        def copy_to_clipboard(e):
-            self.page.set_clipboard(yaml_source)
-            self.page.snack_bar = ft.SnackBar(
-                content=ft.Text("Copied to clipboard!", color=colors.text_primary),
-                bgcolor=colors.success,
-                duration=2000,
-            )
-            self.page.snack_bar.open = True
-            self.page.update()
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.CODE, color=colors.primary),
-                    ft.Text("YAML Source", color=colors.text_primary),
-                ],
-                spacing=8,
-            ),
-            content=ft.Container(
-                content=ft.Column(
-                    controls=[
-                        ft.Container(
-                            content=ft.Text(
-                                yaml_source,
-                                font_family="monospace",
-                                size=12,
-                                color=colors.text_primary,
-                                selectable=True,
-                            ),
-                            bgcolor=colors.bg_elevated,
-                            padding=16,
-                            border_radius=8,
-                            border=ft.border.all(1, colors.border_muted),
-                        ),
-                    ],
-                    scroll=ft.ScrollMode.AUTO,
-                ),
-                width=500,
-                height=300,
-            ),
-            actions=[
-                ft.TextButton("Close", on_click=close_dialog),
-                ft.ElevatedButton(
-                    "Copy",
-                    icon=ft.Icons.COPY,
-                    bgcolor=colors.primary,
-                    color=colors.text_inverse,
-                    on_click=copy_to_clipboard,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_surface,
-        )
-
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
-
-    # Variable insertion methods
-
-    def _build_variable_menu_items(self) -> list[ft.PopupMenuItem]:
-        """Build popup menu items for variable insertion."""
-        items = []
-
-        for category in VARIABLE_CATEGORIES:
-            # Add category header
-            items.append(ft.PopupMenuItem(
-                text=category["name"],
-                disabled=True,
-            ))
-
-            # Add items in category
-            for item in category["items"]:
-                items.append(ft.PopupMenuItem(
-                    text=f"{item.label}",
-                    on_click=lambda e, v=item.value: self._insert_variable_at_cursor(v),
-                ))
-
-            # Add divider between categories
-            items.append(ft.PopupMenuItem())
-
-        return items[:-1]  # Remove last divider
-
-    def _insert_variable_at_cursor(self, variable: str):
-        """Insert a variable at the current cursor position in the replacement field."""
-        current = self.replacement_field.value or ""
-        self.replacement_field.value = current + variable
-        if self._mounted:
-            self.update()
-
-    def _on_replacement_change(self, e):
-        """Handle replacement text change."""
-        # Just a simple handler, no autocomplete logic needed
-        pass
+            self.entry_cloned.emit(self.current_entry)
