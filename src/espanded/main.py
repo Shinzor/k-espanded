@@ -5,6 +5,21 @@ import os
 import sys
 from pathlib import Path
 
+if sys.platform == "win32":
+    # Workarounds for Flet desktop white screen issue on Windows
+    # Try multiple rendering fixes:
+
+    # 1. Disable GPU acceleration (may help with some drivers)
+    os.environ.setdefault("FLET_DESKTOP_WINDOW_DISABLE_GPU", "true")
+
+    # 2. Force software rendering via ANGLE/SwiftShader
+    os.environ.setdefault("ANGLE_DEFAULT_PLATFORM", "swiftshader")
+
+    # 3. Disable Flutter's Impeller rendering engine (new in Flutter 3.22+)
+    # This is the most likely fix for white screen on Windows 10/11
+    os.environ.setdefault("FLUTTER_ENGINE_SWITCHES", "1")
+    os.environ.setdefault("FLUTTER_ENGINE_SWITCH_0", "--no-enable-impeller")
+
 import flet as ft
 
 from espanded.app import create_app
