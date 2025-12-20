@@ -5,7 +5,6 @@ from dataclasses import dataclass, field, asdict
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtCore import Qt
-import pyqtdarktheme
 
 try:
     import darkdetect
@@ -217,13 +216,7 @@ class ThemeManager:
 
     def apply_to_app(self, app: QApplication):
         """Apply theme colors to Qt application."""
-        # Use pyqtdarktheme as base, then customize with our colors
-        if self._is_dark:
-            pyqtdarktheme.setup_theme("dark")
-        else:
-            pyqtdarktheme.setup_theme("light")
-
-        # Apply custom stylesheet for our specific colors
+        # Apply our comprehensive stylesheet
         app.setStyleSheet(self._generate_stylesheet())
 
     def _generate_stylesheet(self) -> str:
