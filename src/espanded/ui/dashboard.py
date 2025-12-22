@@ -23,8 +23,8 @@ class Dashboard(QWidget):
     """Dashboard panel with statistics and quick tips."""
 
     # Signals
-    sync_clicked = Signal()  # Emitted when sync button is clicked
-    settings_clicked = Signal()  # Emitted when configure sync button is clicked
+    sync_clicked = Signal()
+    settings_clicked = Signal()
 
     def __init__(self, theme_manager: ThemeManager, parent=None):
         super().__init__(parent)
@@ -36,10 +36,13 @@ class Dashboard(QWidget):
         """Build the dashboard layout."""
         colors = self.theme_manager.colors
 
+        # Set background
+        self.setStyleSheet(f"background-color: {colors.bg_base};")
+
         # Main layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(24)
 
         # Header
         header = self._create_header()
@@ -49,47 +52,28 @@ class Dashboard(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {colors.bg_base};
-                border: none;
-            }}
-        """)
 
         content = self._create_content()
         scroll.setWidget(content)
-        layout.addWidget(scroll)
+        layout.addWidget(scroll, stretch=1)
 
     def _create_header(self) -> QWidget:
         """Create dashboard header."""
         colors = self.theme_manager.colors
 
         header = QWidget()
+        header.setStyleSheet("background: transparent;")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Icon
-        icon_label = QLabel("\u1F4CA")  # Dashboard emoji
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 24px;
-                color: {colors.primary};
-                background-color: transparent;
-            }}
-        """)
-        header_layout.addWidget(icon_label)
+        header_layout.setSpacing(12)
 
         # Title
         title = QLabel("Dashboard")
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
-        title.setFont(title_font)
         title.setStyleSheet(f"""
-            QLabel {{
-                color: {colors.text_primary};
-                background-color: transparent;
-            }}
+            font-size: 24px;
+            font-weight: 600;
+            color: {colors.text_primary};
+            background: transparent;
         """)
         header_layout.addWidget(title)
         header_layout.addStretch()
@@ -98,406 +82,273 @@ class Dashboard(QWidget):
 
     def _create_content(self) -> QWidget:
         """Create scrollable dashboard content."""
+        colors = self.theme_manager.colors
+
         content = QWidget()
+        content.setStyleSheet(f"background-color: {colors.bg_base};")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(16)
+        content_layout.setSpacing(24)
 
-        # First row: Statistics and Sync Status
-        row1 = QWidget()
-        row1_layout = QHBoxLayout(row1)
-        row1_layout.setContentsMargins(0, 0, 0, 0)
-        row1_layout.setSpacing(16)
+        # Stats cards row
+        stats_row = QWidget()
+        stats_layout = QHBoxLayout(stats_row)
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+        stats_layout.setSpacing(16)
 
-        self.stats_card = self._create_stats_card()
-        row1_layout.addWidget(self.stats_card, stretch=1)
+        # Get stats
+        stats_data = self.app_state.entry_manager.get_stats()
+
+        # Create stat cards
+        self.stat_cards = []
+        stat_items = [
+            ("Total Entries", str(stats_data.get("total_entries", 0)), colors.primary),
+            ("Active Tags", str(stats_data.get("tag_count", 0)), colors.success),
+            ("Created Today", str(stats_data.get("created_today", 0)), colors.warning),
+            ("Modified Today", str(stats_data.get("modified_today", 0)), colors.info),
+        ]
+
+        for label, value, accent_color in stat_items:
+            card = self._create_stat_card(label, value, accent_color)
+            stats_layout.addWidget(card, stretch=1)
+            self.stat_cards.append(card)
+
+        content_layout.addWidget(stats_row)
+
+        # Second row: Sync Status and Tips
+        row2 = QWidget()
+        row2_layout = QHBoxLayout(row2)
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(16)
 
         self.sync_card = self._create_sync_card()
-        row1_layout.addWidget(self.sync_card, stretch=1)
+        row2_layout.addWidget(self.sync_card, stretch=1)
 
-        content_layout.addWidget(row1)
-
-        # Second row: Quick Tips
         tips_card = self._create_tips_card()
-        content_layout.addWidget(tips_card)
+        row2_layout.addWidget(tips_card, stretch=1)
+
+        content_layout.addWidget(row2)
 
         content_layout.addStretch()
-
         return content
 
-    def _create_card(self, title: str, icon: str, content_widget: QWidget) -> QFrame:
-        """Create a card container."""
+    def _create_stat_card(self, label: str, value: str, accent_color: str) -> QFrame:
+        """Create a single stat card."""
         colors = self.theme_manager.colors
 
         card = QFrame()
         card.setStyleSheet(f"""
             QFrame {{
                 background-color: {colors.bg_surface};
-                border: 1px solid {colors.border_muted};
                 border-radius: 12px;
             }}
         """)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
-        # Header with icon and title
-        header = QWidget()
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-
-        # Icon
-        if icon:
-            icon_label = QLabel(icon)
-            icon_label.setStyleSheet(f"""
-                QLabel {{
-                    font-size: 18px;
-                    color: {colors.primary};
-                    background-color: transparent;
-                }}
-            """)
-            header_layout.addWidget(icon_label)
-
-        # Title
-        title_label = QLabel(title)
-        title_font = QFont()
-        title_font.setPointSize(11)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet(f"""
-            QLabel {{
-                color: {colors.text_primary};
-                background-color: transparent;
-            }}
+        # Value (big number)
+        value_label = QLabel(value)
+        value_label.setStyleSheet(f"""
+            font-size: 32px;
+            font-weight: 700;
+            color: {accent_color};
+            background: transparent;
         """)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
+        layout.addWidget(value_label)
 
-        layout.addWidget(header)
-
-        # Divider
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet(f"""
-            QFrame {{
-                background-color: {colors.border_muted};
-                border: none;
-                max-height: 1px;
-            }}
-        """)
-        layout.addWidget(divider)
-
-        # Content
-        layout.addWidget(content_widget)
-
-        return card
-
-    def _create_stats_card(self) -> QFrame:
-        """Create statistics card."""
-        colors = self.theme_manager.colors
-
-        # Get real stats
-        stats_data = self.app_state.entry_manager.get_stats()
-
-        # Format last modified
-        last_modified = stats_data.get("last_modified")
-        if last_modified:
-            try:
-                dt = datetime.fromisoformat(last_modified)
-                last_modified_str = dt.strftime("%b %d, %I:%M %p")
-            except Exception:
-                last_modified_str = "Unknown"
-        else:
-            last_modified_str = "Never"
-
-        # Format entries today
-        entries_today = stats_data.get("created_today", 0)
-        modified_today = stats_data.get("modified_today", 0)
-        today_str = f"{entries_today} new" if entries_today else "None"
-        if modified_today > entries_today:
-            today_str += f", {modified_today - entries_today} modified"
-
-        stats = [
-            ("\u1F4DD", "Total Entries", str(stats_data.get("total_entries", 0))),
-            ("\u1F3F7", "Active Tags", str(stats_data.get("tag_count", 0))),
-            ("\u23F0", "Last Modified", last_modified_str),
-            ("\u1F4C5", "Entries Today", today_str),
-        ]
-
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
-
-        for icon, label, value in stats:
-            stat_widget = self._create_stat_item(icon, label, value)
-            content_layout.addWidget(stat_widget)
-
-        return self._create_card("Statistics", "\u1F4CA", content)
-
-    def _create_stat_item(self, icon: str, label: str, value: str) -> QWidget:
-        """Create a single stat item."""
-        colors = self.theme_manager.colors
-
-        item = QWidget()
-        item_layout = QHBoxLayout(item)
-        item_layout.setContentsMargins(0, 8, 0, 8)
-        item_layout.setSpacing(12)
-
-        # Icon
-        icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 18px;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-            }}
-        """)
-        item_layout.addWidget(icon_label)
-
-        # Label and value
-        text_widget = QWidget()
-        text_layout = QVBoxLayout(text_widget)
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
-
+        # Label
         label_widget = QLabel(label)
         label_widget.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                color: {colors.text_secondary};
-                background-color: transparent;
-            }}
+            font-size: 13px;
+            color: {colors.text_secondary};
+            background: transparent;
         """)
-        text_layout.addWidget(label_widget)
+        layout.addWidget(label_widget)
 
-        value_widget = QLabel(value)
-        value_font = QFont()
-        value_font.setPointSize(11)
-        value_font.setBold(True)
-        value_widget.setFont(value_font)
-        value_widget.setStyleSheet(f"""
-            QLabel {{
-                color: {colors.text_primary};
-                background-color: transparent;
-            }}
-        """)
-        text_layout.addWidget(value_widget)
-
-        item_layout.addWidget(text_widget)
-        item_layout.addStretch()
-
-        return item
+        return card
 
     def _create_sync_card(self) -> QFrame:
         """Create sync status card."""
         colors = self.theme_manager.colors
 
-        # Get real sync status
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border-radius: 12px;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        # Title
+        title = QLabel("GitHub Sync")
+        title.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: 600;
+            color: {colors.text_primary};
+            background: transparent;
+        """)
+        layout.addWidget(title)
+
+        # Get sync status
         settings = self.app_state.settings
         is_connected = bool(settings.github_repo and settings.github_token)
 
+        # Status indicator
+        status_row = QWidget()
+        status_row.setStyleSheet("background: transparent;")
+        status_layout = QHBoxLayout(status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
+
+        status_dot = QLabel("●")
+        status_color = colors.success if is_connected else colors.text_tertiary
+        status_dot.setStyleSheet(f"font-size: 12px; color: {status_color}; background: transparent;")
+        status_layout.addWidget(status_dot)
+
+        status_text = QLabel("Connected" if is_connected else "Not configured")
+        status_text.setStyleSheet(f"font-size: 13px; color: {status_color}; background: transparent;")
+        status_layout.addWidget(status_text)
+        status_layout.addStretch()
+
+        layout.addWidget(status_row)
+
+        # Repository info
+        repo_name = settings.github_repo or "No repository set"
+        repo_label = QLabel(repo_name)
+        repo_label.setStyleSheet(f"""
+            font-size: 12px;
+            color: {colors.text_secondary};
+            background: transparent;
+        """)
+        layout.addWidget(repo_label)
+
+        # Last sync
         last_sync = "Never"
         if settings.last_sync:
             try:
                 last_sync = settings.last_sync.strftime("%b %d, %I:%M %p")
             except Exception:
                 pass
-
-        repo_name = settings.github_repo or "Not configured"
-
-        status_icon = "\u2713" if is_connected else "\u2601"  # Checkmark or Cloud
-        status_text = "Connected" if is_connected else "Not connected"
-        status_color = colors.success if is_connected else colors.text_tertiary
-
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(8)
-
-        # Status row
-        status_row = QWidget()
-        status_layout = QHBoxLayout(status_row)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(8)
-
-        status_icon_label = QLabel(status_icon)
-        status_icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 16px;
-                color: {status_color};
-                background-color: transparent;
-            }}
-        """)
-        status_layout.addWidget(status_icon_label)
-
-        status_label = QLabel(status_text)
-        status_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                color: {status_color};
-                background-color: transparent;
-            }}
-        """)
-        status_layout.addWidget(status_label)
-        status_layout.addStretch()
-
-        content_layout.addWidget(status_row)
-
-        # Info section
-        info_widget = QWidget()
-        info_layout = QVBoxLayout(info_widget)
-        info_layout.setContentsMargins(0, 8, 0, 0)
-        info_layout.setSpacing(4)
-
-        repo_label = QLabel(f"Repository: {repo_name}")
-        repo_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                color: {colors.text_secondary};
-                background-color: transparent;
-            }}
-        """)
-        info_layout.addWidget(repo_label)
-
         sync_label = QLabel(f"Last sync: {last_sync}")
         sync_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                color: {colors.text_secondary};
-                background-color: transparent;
-            }}
+            font-size: 12px;
+            color: {colors.text_tertiary};
+            background: transparent;
         """)
-        info_layout.addWidget(sync_label)
-
-        content_layout.addWidget(info_widget)
+        layout.addWidget(sync_label)
 
         # Action button
+        layout.addStretch()
         self.sync_button = QPushButton()
         if is_connected:
-            self.sync_button.setText("\u21BB Sync Now")
+            self.sync_button.setText("Sync Now")
             self.sync_button.clicked.connect(self.sync_clicked.emit)
         else:
-            self.sync_button.setText("\u2699 Configure Sync")
+            self.sync_button.setText("Configure Sync")
             self.sync_button.clicked.connect(self.settings_clicked.emit)
-
-        self.sync_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {colors.primary};
-                color: {colors.text_inverse};
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: 500;
-            }}
-            QPushButton:hover {{
-                background-color: {colors.primary_hover};
-            }}
-        """)
         self.sync_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        content_layout.addWidget(self.sync_button)
+        layout.addWidget(self.sync_button)
 
-        return self._create_card("Sync Status", "\u21BB", content)
+        return card
 
     def _create_tips_card(self) -> QFrame:
         """Create quick tips card."""
         colors = self.theme_manager.colors
 
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border-radius: 12px;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        # Title
+        title = QLabel("Quick Tips")
+        title.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: 600;
+            color: {colors.text_primary};
+            background: transparent;
+        """)
+        layout.addWidget(title)
+
         tips = [
-            ("Select text + Ctrl+Shift+E", "Quickly create a new entry from selected text"),
-            ("Type {{ in replacement", "Insert variables, forms, and scripts"),
-            ("Use tags", "Organize and filter your entries efficiently"),
-            ("Prefix options", "Use :, ;, //, :: or blank for different trigger styles"),
+            ("Ctrl+Shift+E", "Quick add from selected text"),
+            ("Use {{ in text", "Insert variables and forms"),
+            ("Add tags", "Organize entries for easy filtering"),
+            ("Prefix options", "Use :, ;, //, :: or blank"),
         ]
 
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(6)
-
         for shortcut, description in tips:
-            tip_widget = self._create_tip_item(shortcut, description)
-            content_layout.addWidget(tip_widget)
+            tip = self._create_tip_item(shortcut, description)
+            layout.addWidget(tip)
 
-        return self._create_card("Quick Tips", "\u1F4A1", content)
+        layout.addStretch()
+        return card
 
     def _create_tip_item(self, shortcut: str, description: str) -> QWidget:
         """Create a single tip item."""
         colors = self.theme_manager.colors
 
         item = QWidget()
+        item.setStyleSheet("background: transparent;")
         item_layout = QHBoxLayout(item)
-        item_layout.setContentsMargins(0, 6, 0, 6)
+        item_layout.setContentsMargins(0, 4, 0, 4)
         item_layout.setSpacing(12)
 
-        # Lightbulb icon
-        icon_label = QLabel("\u1F4A1")
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 16px;
-                color: {colors.warning};
-                background-color: transparent;
-            }}
-        """)
-        item_layout.addWidget(icon_label)
-
-        # Text
-        text_widget = QWidget()
-        text_layout = QVBoxLayout(text_widget)
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
-
+        # Shortcut badge - use border instead of background
         shortcut_label = QLabel(shortcut)
-        shortcut_font = QFont()
-        shortcut_font.setPointSize(10)
-        shortcut_font.setBold(True)
-        shortcut_label.setFont(shortcut_font)
         shortcut_label.setStyleSheet(f"""
-            QLabel {{
-                color: {colors.text_primary};
-                background-color: transparent;
-            }}
+            font-size: 11px;
+            font-weight: 600;
+            color: {colors.primary};
+            background-color: transparent;
+            border: 1px solid {colors.primary};
+            border-radius: 4px;
+            padding: 4px 8px;
         """)
-        text_layout.addWidget(shortcut_label)
+        item_layout.addWidget(shortcut_label)
 
+        # Description
         desc_label = QLabel(description)
         desc_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                color: {colors.text_secondary};
-                background-color: transparent;
-            }}
+            font-size: 13px;
+            color: {colors.text_secondary};
+            background: transparent;
         """)
-        desc_label.setWordWrap(True)
-        text_layout.addWidget(desc_label)
-
-        item_layout.addWidget(text_widget, stretch=1)
+        item_layout.addWidget(desc_label, stretch=1)
 
         return item
 
     def refresh_stats(self):
         """Refresh dashboard statistics."""
-        # Rebuild stats and sync cards
-        old_stats = self.stats_card
-        old_sync = self.sync_card
+        # Get fresh stats
+        stats_data = self.app_state.entry_manager.get_stats()
+        colors = self.theme_manager.colors
 
-        # Find parent layout (row1_layout)
-        parent = old_stats.parent()
-        if parent:
-            layout = parent.layout()
-            if layout:
-                # Remove old widgets
-                layout.removeWidget(old_stats)
-                layout.removeWidget(old_sync)
-                old_stats.deleteLater()
-                old_sync.deleteLater()
+        stat_values = [
+            str(stats_data.get("total_entries", 0)),
+            str(stats_data.get("tag_count", 0)),
+            str(stats_data.get("created_today", 0)),
+            str(stats_data.get("modified_today", 0)),
+        ]
 
-                # Create new widgets
-                self.stats_card = self._create_stats_card()
-                layout.insertWidget(0, self.stats_card, stretch=1)
-
-                self.sync_card = self._create_sync_card()
-                layout.insertWidget(1, self.sync_card, stretch=1)
+        # Update stat card values
+        for i, card in enumerate(self.stat_cards):
+            if i < len(stat_values):
+                # Find the value label (first QLabel in the card)
+                for child in card.findChildren(QLabel):
+                    if child.styleSheet() and "font-size: 32px" in child.styleSheet():
+                        child.setText(stat_values[i])
+                        break

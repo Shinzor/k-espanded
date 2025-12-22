@@ -52,41 +52,28 @@ class Sidebar(QWidget):
         """Build the sidebar layout."""
         colors = self.theme_manager.colors
 
-        # Set background and border
-        self.setStyleSheet(
-            f"""
+        # Set background
+        self.setStyleSheet(f"""
             QWidget {{
                 background-color: {colors.bg_sidebar};
             }}
-            QFrame#sidebar_frame {{
-                background-color: {colors.bg_sidebar};
-                border-right: 1px solid {colors.border_muted};
-            }}
-        """
-        )
+        """)
 
-        # Main frame (to handle border)
-        frame = QFrame()
-        frame.setObjectName("sidebar_frame")
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setContentsMargins(0, 0, 0, 0)
-        frame_layout.setSpacing(0)
-
-        # Content layout
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(12, 12, 12, 12)
-        content_layout.setSpacing(8)
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
 
         # Search bar
         self.search_bar = SearchBar(self.theme_manager)
         self.search_bar.search_changed.connect(self._on_search_changed)
-        content_layout.addWidget(self.search_bar)
+        layout.addWidget(self.search_bar)
 
         # View tabs
         self.view_tabs = ViewTabs(self.theme_manager)
         self.view_tabs.view_changed.connect(self._on_view_changed)
         self.view_tabs.tag_selected.connect(self._on_tag_selected)
-        content_layout.addWidget(self.view_tabs)
+        layout.addWidget(self.view_tabs)
 
         # Scrollable entry list
         scroll_area = QScrollArea()
@@ -94,53 +81,37 @@ class Sidebar(QWidget):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setStyleSheet(
-            f"""
-            QScrollArea {{
-                background-color: {colors.bg_sidebar};
-                border: none;
-            }}
-        """
-        )
 
         # Entry list container
         self.entry_list_widget = QWidget()
+        self.entry_list_widget.setStyleSheet(f"background-color: {colors.bg_sidebar};")
         self.entry_list_layout = QVBoxLayout(self.entry_list_widget)
         self.entry_list_layout.setContentsMargins(0, 8, 0, 8)
-        self.entry_list_layout.setSpacing(2)
+        self.entry_list_layout.setSpacing(4)
         self.entry_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         scroll_area.setWidget(self.entry_list_widget)
-        content_layout.addWidget(scroll_area, stretch=1)
+        layout.addWidget(scroll_area, stretch=1)
 
-        # Add Entry button (fixed at bottom)
+        # Add Entry button
         self.add_button = QPushButton("+ Add Entry")
         self.add_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_button.clicked.connect(self.add_entry_clicked.emit)
-        self.add_button.setStyleSheet(
-            f"""
+        self.add_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {colors.primary};
                 color: {colors.text_inverse};
                 border: none;
                 border-radius: 8px;
-                padding: 10px;
+                padding: 12px;
                 font-size: 14px;
                 font-weight: 600;
             }}
             QPushButton:hover {{
                 background-color: {colors.primary_hover};
             }}
-        """
-        )
-        content_layout.addWidget(self.add_button)
-
-        frame_layout.addLayout(content_layout)
-
-        # Set frame as the main widget
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(frame)
+        """)
+        layout.addWidget(self.add_button)
 
     def _load_entries(self):
         """Load entries from entry manager based on current filters."""
@@ -148,7 +119,6 @@ class Sidebar(QWidget):
         if self._current_view == "all":
             entries = self.app_state.entry_manager.get_all_entries()
         elif self._current_view == "favorites":
-            # TODO: Implement favorites filtering when Entry model supports it
             entries = [
                 e
                 for e in self.app_state.entry_manager.get_all_entries()
@@ -160,7 +130,6 @@ class Sidebar(QWidget):
                     query="", tags=[self._selected_tag]
                 )
             else:
-                # Show all entries with any tags
                 entries = [e for e in self.app_state.entry_manager.get_all_entries() if e.tags]
         elif self._current_view == "trash":
             entries = self.app_state.entry_manager.get_deleted_entries()
@@ -222,49 +191,24 @@ class Sidebar(QWidget):
         # Determine message based on view
         if self._search_query or self._selected_tag:
             message = "No entries found"
-            icon = "\u1F50D"  # Magnifying glass
         elif self._current_view == "trash":
             message = "Trash is empty"
-            icon = "\u1F5D1"  # Trash can
         elif self._current_view == "favorites":
             message = "No favorites yet"
-            icon = "\u2606"  # Empty star
         elif self._current_view == "tags":
             message = "No tagged entries"
-            icon = "\u23F7"  # Label
         else:
-            message = "No entries yet"
-            icon = "\u1F4DD"  # Memo
-
-        # Icon label
-        icon_label = QLabel(icon)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet(
-            f"""
-            QLabel {{
-                font-size: 48px;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-                padding: 20px;
-            }}
-        """
-        )
-        self.entry_list_layout.addWidget(icon_label)
+            message = "No entries yet\nClick + Add Entry to create one"
 
         # Message label
         msg_label = QLabel(message)
         msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         msg_label.setWordWrap(True)
-        msg_label.setStyleSheet(
-            f"""
-            QLabel {{
-                font-size: 14px;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-                padding: 0px 20px 20px 20px;
-            }}
-        """
-        )
+        msg_label.setStyleSheet(f"""
+            font-size: 13px;
+            color: {colors.text_tertiary};
+            padding: 40px 20px;
+        """)
         self.entry_list_layout.addWidget(msg_label)
 
     def _on_search_changed(self, text: str):
@@ -275,7 +219,7 @@ class Sidebar(QWidget):
     def _on_view_changed(self, view: str):
         """Handle view tab change."""
         self._current_view = view
-        self._selected_tag = None  # Clear tag filter when changing views
+        self._selected_tag = None
         self._load_entries()
 
     def _on_tag_selected(self, tag: str):
@@ -318,8 +262,7 @@ class Sidebar(QWidget):
 
         # Create context menu
         menu = QMenu(self)
-        menu.setStyleSheet(
-            f"""
+        menu.setStyleSheet(f"""
             QMenu {{
                 background-color: {colors.bg_elevated};
                 color: {colors.text_primary};
@@ -337,43 +280,39 @@ class Sidebar(QWidget):
             QMenu::separator {{
                 height: 1px;
                 background-color: {colors.border_muted};
-                margin: 4px 0px;
+                margin: 4px 8px;
             }}
-        """
-        )
+        """)
 
         # Menu actions
         if self._current_view == "trash":
-            # Trash view actions
-            restore_action = menu.addAction("\u21BA Restore")
+            restore_action = menu.addAction("Restore")
             restore_action.triggered.connect(lambda: self._restore_entry(entry_id))
 
-            delete_action = menu.addAction("\u2715 Delete Permanently")
+            delete_action = menu.addAction("Delete Permanently")
             delete_action.triggered.connect(lambda: self._permanent_delete_entry(entry_id))
         else:
-            # Normal view actions
-            edit_action = menu.addAction("\u270E Edit")
+            edit_action = menu.addAction("Edit")
             edit_action.triggered.connect(lambda: self._edit_entry(entry_id))
 
-            duplicate_action = menu.addAction("\u2398 Duplicate")
+            duplicate_action = menu.addAction("Duplicate")
             duplicate_action.triggered.connect(lambda: self._duplicate_entry(entry_id))
 
             menu.addSeparator()
 
-            # TODO: Implement toggle favorite when Entry model supports it
-            favorite_action = menu.addAction("\u2605 Toggle Favorite")
+            favorite_action = menu.addAction("Toggle Favorite")
             favorite_action.triggered.connect(lambda: self._toggle_favorite(entry_id))
 
             menu.addSeparator()
 
-            delete_action = menu.addAction("\u1F5D1 Delete")
+            delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(lambda: self._delete_entry(entry_id))
 
         # Show menu
         menu.exec(pos)
 
     def _edit_entry(self, entry_id: str):
-        """Edit entry (emit double-click signal)."""
+        """Edit entry."""
         entry = self.app_state.entry_manager.get_entry(entry_id)
         if entry:
             self.entry_double_clicked.emit(entry)
@@ -381,35 +320,29 @@ class Sidebar(QWidget):
     def _duplicate_entry(self, entry_id: str):
         """Duplicate entry."""
         self.app_state.entry_manager.clone_entry(entry_id)
-        # Entries will auto-refresh via change listener
 
     def _toggle_favorite(self, entry_id: str):
         """Toggle entry favorite status."""
-        # TODO: Implement when Entry model supports favorited field
-        pass
+        pass  # TODO: Implement when Entry model supports favorited field
 
     def _delete_entry(self, entry_id: str):
         """Delete entry (move to trash)."""
         self.app_state.entry_manager.delete_entry(entry_id)
-        # Entries will auto-refresh via change listener
 
     def _restore_entry(self, entry_id: str):
         """Restore entry from trash."""
         self.app_state.entry_manager.restore_entry(entry_id)
-        # Entries will auto-refresh via change listener
 
     def _permanent_delete_entry(self, entry_id: str):
         """Permanently delete entry."""
-        # TODO: Add confirmation dialog
         self.app_state.entry_manager.permanent_delete(entry_id)
-        # Entries will auto-refresh via change listener
 
     def _on_entries_changed(self):
         """Handle entry manager change notification."""
         self._load_entries()
 
     def refresh_entries(self):
-        """Refresh entry list (public method)."""
+        """Refresh entry list."""
         self._load_entries()
 
     def clear_selection(self):

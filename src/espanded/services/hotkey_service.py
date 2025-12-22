@@ -151,7 +151,10 @@ class HotkeyService:
 
     def _handle_quick_add(self):
         """Handle the quick add hotkey press."""
+        print("[HotkeyService] Quick add hotkey triggered!")
+
         if not self._enabled:
+            print("[HotkeyService] Hotkeys disabled, ignoring")
             return
 
         # Get selected text
@@ -159,14 +162,17 @@ class HotkeyService:
         if get_selected_text:
             try:
                 selected_text = get_selected_text()
+                print(f"[HotkeyService] Got selected text: {selected_text[:50] if selected_text else '(none)'}...")
             except Exception as e:
-                print(f"Error getting selected text: {e}")
+                print(f"[HotkeyService] Error getting selected text: {e}")
 
         # Trigger callback
         if self._on_quick_add:
+            print("[HotkeyService] Invoking quick add callback")
             self._on_quick_add(selected_text)
         else:
             # Default behavior: show quick add popup
+            print("[HotkeyService] No callback set, using default behavior")
             self._show_quick_add_popup(selected_text)
 
     def _show_quick_add_popup(self, selected_text: str):

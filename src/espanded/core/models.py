@@ -149,10 +149,17 @@ class Settings:
     theme: str = "system"  # light, dark, system
     custom_colors: dict[str, str] = field(default_factory=dict)
 
-    # Hotkeys
-    quick_add_hotkey: str = "<ctrl>+<alt>+`"
+    # Hotkeys (using 'e' - backtick has issues on Windows with pynput)
+    quick_add_hotkey: str = "<ctrl>+<alt>+e"
     hotkeys_enabled: bool = True
     minimize_to_tray: bool = True
+
+    # Autocomplete (inline suggestions while typing)
+    autocomplete_enabled: bool = True
+    autocomplete_triggers: list[str] = field(default_factory=lambda: [":"])
+    autocomplete_min_chars: int = 0  # chars after trigger before showing popup
+    autocomplete_max_suggestions: int = 8
+    autocomplete_show_delay_ms: int = 100  # delay before showing popup
 
     # Espanso Integration
     espanso_config_path: str = ""
@@ -174,6 +181,11 @@ class Settings:
             "quick_add_hotkey": self.quick_add_hotkey,
             "hotkeys_enabled": self.hotkeys_enabled,
             "minimize_to_tray": self.minimize_to_tray,
+            "autocomplete_enabled": self.autocomplete_enabled,
+            "autocomplete_triggers": self.autocomplete_triggers,
+            "autocomplete_min_chars": self.autocomplete_min_chars,
+            "autocomplete_max_suggestions": self.autocomplete_max_suggestions,
+            "autocomplete_show_delay_ms": self.autocomplete_show_delay_ms,
             "espanso_config_path": self.espanso_config_path,
             "has_imported": self.has_imported,
             "last_sync": self.last_sync.isoformat() if self.last_sync else None,
@@ -194,9 +206,14 @@ class Settings:
             default_prefix=data.get("default_prefix", ":"),
             theme=data.get("theme", "system"),
             custom_colors=data.get("custom_colors", {}),
-            quick_add_hotkey=data.get("quick_add_hotkey", "<ctrl>+<alt>+`"),
+            quick_add_hotkey=data.get("quick_add_hotkey", "<ctrl>+<alt>+e"),
             hotkeys_enabled=data.get("hotkeys_enabled", True),
             minimize_to_tray=data.get("minimize_to_tray", True),
+            autocomplete_enabled=data.get("autocomplete_enabled", True),
+            autocomplete_triggers=data.get("autocomplete_triggers", [":"]),
+            autocomplete_min_chars=data.get("autocomplete_min_chars", 0),
+            autocomplete_max_suggestions=data.get("autocomplete_max_suggestions", 8),
+            autocomplete_show_delay_ms=data.get("autocomplete_show_delay_ms", 100),
             espanso_config_path=data.get("espanso_config_path", ""),
             has_imported=data.get("has_imported", False),
             last_sync=last_sync,

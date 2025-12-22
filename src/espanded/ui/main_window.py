@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QApplication,
 )
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, Signal
 from PySide6.QtGui import QMouseEvent
 
 from espanded.ui.theme import ThemeManager
@@ -29,6 +29,9 @@ from espanded.core.models import Entry
 class MainWindow(QMainWindow):
     """Main application window with frameless design and two-pane layout."""
 
+    # Signal for cross-thread communication (hotkey triggers from background thread)
+    _quick_add_signal = Signal(str)
+
     def __init__(self, theme_manager: ThemeManager, tray=None, hotkey_service=None):
         super().__init__()
         self.theme_manager = theme_manager
@@ -39,6 +42,9 @@ class MainWindow(QMainWindow):
         # Window drag state
         self._drag_pos: QPoint | None = None
         self._is_maximized = False
+
+        # Quick add popup reference (to prevent garbage collection)
+        self._quick_add_popup = None
 
         self._setup_window()
         self._setup_ui()
@@ -339,17 +345,14 @@ class MainWindow(QMainWindow):
         if not self.hotkey_service:
             return
 
-        # Set up callback for quick add hotkey
-        from PySide6.QtCore import QMetaObject
+        # Connect our signal to the show_quick_add slot (Qt handles thread-safety via queued connection)
+        self._quick_add_signal.connect(self.show_quick_add)
 
+        # Set up callback for quick add hotkey - emit signal from background thread
         def on_quick_add(selected_text: str):
-            # Use Qt's thread-safe signal mechanism
-            QMetaObject.invokeMethod(
-                self,
-                "show_quick_add",
-                Qt.ConnectionType.QueuedConnection,
-                selected_text,
-            )
+            # Emit signal - Qt will queue this to the main thread automatically
+            print(f"[MainWindow] Emitting _quick_add_signal with text: {selected_text[:30] if selected_text else '(empty)'}...")
+            self._quick_add_signal.emit(selected_text)
 
         self.hotkey_service.set_callbacks(on_quick_add=on_quick_add)
 
@@ -377,9 +380,24 @@ class MainWindow(QMainWindow):
         Args:
             selected_text: Pre-filled text from selection
         """
-        popup = QuickAddPopup(self.theme_manager, selected_text, self)
-        popup.entry_created.connect(self._on_quick_add_entry_created)
-        popup.show_at_cursor()
+        print("[MainWindow] show_quick_add called")
+        try:
+            # Store popup as instance variable to prevent garbage collection
+            self._quick_add_popup = QuickAddPopup(self.theme_manager, selected_text, self)
+            self._quick_add_popup.entry_created.connect(self._on_quick_add_entry_created)
+            self._quick_add_popup.finished.connect(self._on_quick_add_finished)
+            print("[MainWindow] QuickAddPopup created, showing at cursor...")
+            self._quick_add_popup.show_at_cursor()
+            print("[MainWindow] QuickAddPopup show_at_cursor() completed")
+        except Exception as e:
+            print(f"[MainWindow] ERROR showing quick add popup: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _on_quick_add_finished(self, result: int):
+        """Handle quick add popup closed."""
+        # Clear reference to allow garbage collection
+        self._quick_add_popup = None
 
     def _on_quick_add_entry_created(self, entry: Entry):
         """Handle entry created from quick add popup."""

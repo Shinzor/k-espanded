@@ -29,30 +29,30 @@ class ViewTabs(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        # Create tab buttons
+        # Create tab buttons (using simple text for cross-platform compatibility)
         self.all_button = self._create_tab_button(
-            "\u2630 All",  # List icon
+            "All",
             "all",
             "Show all entries",
         )
         layout.addWidget(self.all_button)
 
         self.favorites_button = self._create_tab_button(
-            "\u2605 Favorites",  # Star icon
+            "Favorites",
             "favorites",
             "Show favorited entries",
         )
         layout.addWidget(self.favorites_button)
 
         self.tags_button = self._create_tab_button(
-            "\u23F7 Tags",  # Label icon
+            "Tags",
             "tags",
             "Filter by tags",
         )
         layout.addWidget(self.tags_button)
 
         self.trash_button = self._create_tab_button(
-            "\u1F5D1 Trash",  # Trash icon
+            "Trash",
             "trash",
             "Show deleted entries",
         )

@@ -10,9 +10,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QComboBox,
     QFrame,
+    QWidget,
 )
 from PySide6.QtCore import Qt, Signal, QPoint
-from PySide6.QtGui import QKeyEvent, QCursor
+from PySide6.QtGui import QKeyEvent, QCursor, QMouseEvent
 
 from espanded.ui.theme import ThemeManager
 from espanded.core.app_state import get_app_state
@@ -29,10 +30,17 @@ class QuickAddPopup(QDialog):
     entry_created = Signal(Entry)
 
     def __init__(self, theme_manager: ThemeManager, selected_text: str = "", parent=None):
-        super().__init__(parent)
+        # Pass None as parent to prevent main window from showing
+        super().__init__(None)
         self.theme_manager = theme_manager
         self.selected_text = selected_text
         self.app_state = get_app_state()
+
+        # Drag state
+        self._drag_pos: QPoint | None = None
+
+        # Tags list
+        self._tags: list[str] = []
 
         self._setup_window()
         self._setup_ui()
@@ -40,16 +48,17 @@ class QuickAddPopup(QDialog):
 
     def _setup_window(self):
         """Configure window properties."""
-        # Frameless, always on top
+        # Frameless, always on top, tool window (doesn't show in taskbar)
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
 
-        # Fixed size
-        self.setFixedSize(400, 320)
+        # Fixed size (increased for tags)
+        self.setFixedSize(420, 400)
 
         # Apply theme
         colors = self.theme_manager.colors
@@ -58,7 +67,7 @@ class QuickAddPopup(QDialog):
             QDialog {{
                 background-color: {colors.bg_surface};
                 border: 2px solid {colors.primary};
-                border-radius: 8px;
+                border-radius: 12px;
             }}
         """
         )
@@ -69,29 +78,33 @@ class QuickAddPopup(QDialog):
 
         # Main layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(10)
 
-        # Header
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        # Header (draggable area)
+        self.header = QWidget()
+        self.header.setStyleSheet("background: transparent;")
+        self.header.setCursor(Qt.CursorShape.SizeAllCursor)
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
 
-        title_label = QLabel("⚡ Quick Add Entry")
+        title_label = QLabel("Quick Add Entry")
         title_label.setStyleSheet(
             f"""
             QLabel {{
                 color: {colors.text_primary};
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: 600;
                 background: transparent;
             }}
         """
         )
-        header.addWidget(title_label)
-        header.addStretch()
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
 
         # Close button
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("X")
         close_btn.setFixedSize(24, 24)
         close_btn.setStyleSheet(
             f"""
@@ -100,7 +113,8 @@ class QuickAddPopup(QDialog):
                 color: {colors.text_secondary};
                 border: none;
                 border-radius: 12px;
-                font-size: 16px;
+                font-size: 12px;
+                font-weight: bold;
                 padding: 0px;
             }}
             QPushButton:hover {{
@@ -110,47 +124,67 @@ class QuickAddPopup(QDialog):
         """
         )
         close_btn.clicked.connect(self.reject)
-        header.addWidget(close_btn)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(close_btn)
 
-        layout.addLayout(header)
+        layout.addWidget(self.header)
 
         # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFixedHeight(1)
         separator.setStyleSheet(f"background-color: {colors.border_muted}; border: none;")
         layout.addWidget(separator)
+
+        # Trigger section
+        trigger_label = QLabel("Trigger")
+        trigger_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {colors.text_secondary};
+                font-size: 11px;
+                font-weight: 500;
+                background: transparent;
+            }}
+        """
+        )
+        layout.addWidget(trigger_label)
 
         # Trigger row
         trigger_row = QHBoxLayout()
         trigger_row.setSpacing(8)
 
-        # Prefix dropdown
+        # Prefix dropdown with proper arrow
         self.prefix_combo = QComboBox()
-        self.prefix_combo.addItems([":", ";", "/", "//", "::", "none"])
-        self.prefix_combo.setCurrentText(":")
-        self.prefix_combo.setFixedWidth(80)
+        self.prefix_combo.addItems([":", ";", "//", "::", "(none)"])
+        self.prefix_combo.setCurrentIndex(0)
+        self.prefix_combo.setFixedWidth(75)
         self.prefix_combo.setStyleSheet(
             f"""
             QComboBox {{
                 background-color: {colors.bg_elevated};
                 color: {colors.text_primary};
                 border: 1px solid {colors.border_default};
-                border-radius: 4px;
-                padding: 6px 8px;
-                font-size: 13px;
+                border-radius: 6px;
+                padding: 8px 10px;
+                font-size: 14px;
+                font-weight: 500;
             }}
             QComboBox:focus {{
                 border: 1px solid {colors.primary};
             }}
             QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 24px;
                 border: none;
-                width: 20px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {colors.bg_elevated};
                 color: {colors.text_primary};
                 border: 1px solid {colors.border_default};
                 selection-background-color: {colors.entry_selected};
+                outline: none;
             }}
         """
         )
@@ -165,9 +199,9 @@ class QuickAddPopup(QDialog):
                 background-color: {colors.bg_elevated};
                 color: {colors.text_primary};
                 border: 1px solid {colors.border_default};
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 13px;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
             }}
             QLineEdit:focus {{
                 border: 1px solid {colors.primary};
@@ -178,31 +212,34 @@ class QuickAddPopup(QDialog):
 
         layout.addLayout(trigger_row)
 
-        # Trigger label
-        trigger_label = QLabel("Trigger")
-        trigger_label.setStyleSheet(
+        # Replacement section
+        replacement_label = QLabel("Replacement" + (" (from selection)" if self.selected_text else ""))
+        replacement_label.setStyleSheet(
             f"""
             QLabel {{
                 color: {colors.text_secondary};
                 font-size: 11px;
+                font-weight: 500;
                 background: transparent;
+                margin-top: 4px;
             }}
         """
         )
-        layout.addWidget(trigger_label)
+        layout.addWidget(replacement_label)
 
         # Replacement text area
         self.replacement_text = QTextEdit()
         self.replacement_text.setPlaceholderText("Replacement text...")
         self.replacement_text.setPlainText(self.selected_text)
-        self.replacement_text.setMinimumHeight(100)
+        self.replacement_text.setMinimumHeight(80)
+        self.replacement_text.setMaximumHeight(120)
         self.replacement_text.setStyleSheet(
             f"""
             QTextEdit {{
                 background-color: {colors.bg_elevated};
                 color: {colors.text_primary};
                 border: 1px solid {colors.border_default};
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 8px;
                 font-size: 13px;
                 font-family: 'Consolas', 'Monaco', monospace;
@@ -214,18 +251,60 @@ class QuickAddPopup(QDialog):
         )
         layout.addWidget(self.replacement_text)
 
-        # Replacement label
-        replacement_label = QLabel("Replacement" + (" (from selection)" if self.selected_text else ""))
-        replacement_label.setStyleSheet(
+        # Tags section
+        tags_label = QLabel("Tags (optional)")
+        tags_label.setStyleSheet(
             f"""
             QLabel {{
                 color: {colors.text_secondary};
                 font-size: 11px;
+                font-weight: 500;
                 background: transparent;
+                margin-top: 4px;
             }}
         """
         )
-        layout.addWidget(replacement_label)
+        layout.addWidget(tags_label)
+
+        # Tags row
+        tags_row = QWidget()
+        tags_row.setStyleSheet("background: transparent;")
+        tags_layout = QHBoxLayout(tags_row)
+        tags_layout.setContentsMargins(0, 0, 0, 0)
+        tags_layout.setSpacing(6)
+
+        # Tags container
+        self.tags_container = QWidget()
+        self.tags_container.setStyleSheet("background: transparent;")
+        self.tags_flow = QHBoxLayout(self.tags_container)
+        self.tags_flow.setContentsMargins(0, 0, 0, 0)
+        self.tags_flow.setSpacing(4)
+        self.tags_flow.addStretch()
+        tags_layout.addWidget(self.tags_container, stretch=1)
+
+        # Add tag input
+        self.tag_input = QLineEdit()
+        self.tag_input.setPlaceholderText("Add tag...")
+        self.tag_input.setFixedWidth(100)
+        self.tag_input.returnPressed.connect(self._add_tag)
+        self.tag_input.setStyleSheet(
+            f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {colors.primary};
+            }}
+        """
+        )
+        tags_layout.addWidget(self.tag_input)
+
+        layout.addWidget(tags_row)
 
         # Error message
         self.error_label = QLabel()
@@ -248,14 +327,13 @@ class QuickAddPopup(QDialog):
         button_row.addStretch()
 
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setProperty("secondary", True)
         cancel_btn.setStyleSheet(
             f"""
             QPushButton {{
                 background-color: {colors.bg_elevated};
                 color: {colors.text_primary};
                 border: 1px solid {colors.border_default};
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 13px;
                 font-weight: 500;
@@ -267,9 +345,10 @@ class QuickAddPopup(QDialog):
         """
         )
         cancel_btn.clicked.connect(self.reject)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         button_row.addWidget(cancel_btn)
 
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton("Save Entry")
         save_btn.setDefault(True)
         save_btn.setStyleSheet(
             f"""
@@ -277,7 +356,7 @@ class QuickAddPopup(QDialog):
                 background-color: {colors.primary};
                 color: {colors.text_inverse};
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 8px 20px;
                 font-size: 13px;
                 font-weight: 600;
@@ -288,14 +367,77 @@ class QuickAddPopup(QDialog):
         """
         )
         save_btn.clicked.connect(self._on_save)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         button_row.addWidget(save_btn)
 
         layout.addLayout(button_row)
 
     def _connect_signals(self):
         """Connect signals."""
-        # Enter key in trigger field should focus replacement
-        self.trigger_input.returnPressed.connect(self.replacement_text.setFocus)
+        pass
+
+    def _add_tag(self):
+        """Add a tag from the input field."""
+        tag = self.tag_input.text().strip()
+        if tag and tag not in self._tags:
+            self._tags.append(tag)
+            self._add_tag_chip(tag)
+            self.tag_input.clear()
+
+    def _add_tag_chip(self, tag: str):
+        """Add a tag chip to the container."""
+        colors = self.theme_manager.colors
+
+        chip = QWidget()
+        chip.setProperty("tag", tag)
+        chip.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors.tag_bg};
+                border-radius: 10px;
+            }}
+        """)
+        chip_layout = QHBoxLayout(chip)
+        chip_layout.setContentsMargins(8, 3, 4, 3)
+        chip_layout.setSpacing(4)
+
+        tag_label = QLabel(tag)
+        tag_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.tag_text};
+                background: transparent;
+            }}
+        """)
+        chip_layout.addWidget(tag_label)
+
+        remove_btn = QPushButton("x")
+        remove_btn.setFixedSize(14, 14)
+        remove_btn.clicked.connect(lambda: self._remove_tag(chip, tag))
+        remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {colors.tag_text};
+                border: none;
+                font-size: 10px;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                color: {colors.text_primary};
+            }}
+        """)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        chip_layout.addWidget(remove_btn)
+
+        # Insert before the stretch
+        self.tags_flow.insertWidget(self.tags_flow.count() - 1, chip)
+
+    def _remove_tag(self, chip: QWidget, tag: str):
+        """Remove a tag chip."""
+        if tag in self._tags:
+            self._tags.remove(tag)
+        self.tags_flow.removeWidget(chip)
+        chip.deleteLater()
 
     def _on_save(self):
         """Handle save button click."""
@@ -313,26 +455,24 @@ class QuickAddPopup(QDialog):
             self._show_error("Please enter replacement text")
             return
 
-        # Build full trigger
-        if prefix == "none":
-            full_trigger = trigger
-        else:
-            full_trigger = f"{prefix}{trigger}"
+        # Handle prefix
+        if prefix == "(none)":
+            prefix = ""
 
         # Create entry
         try:
             entry = Entry(
-                id="",  # Will be generated by entry manager
-                trigger=full_trigger,
+                id="",  # Will be generated
+                trigger=trigger,
+                prefix=prefix,
                 replacement=replacement,
-                description="",
-                tags=[],
-                category="",
-                is_regex=False,
-                case_sensitive=False,
+                tags=self._tags.copy(),
                 word=True,
                 propagate_case=False,
-                uppercase_style=None,
+                regex=False,
+                case_insensitive=False,
+                force_clipboard=False,
+                passive=False,
             )
 
             # Save via entry manager
@@ -375,6 +515,29 @@ class QuickAddPopup(QDialog):
 
         # Focus trigger input
         self.trigger_input.setFocus()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle mouse press for window dragging."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Check if click is within header bounds
+            header_rect = self.header.geometry()
+            if header_rect.contains(event.pos()):
+                self._drag_pos = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Handle mouse move for window dragging."""
+        if self._drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Handle mouse release to stop dragging."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = None
+        super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
         """Handle key press events."""

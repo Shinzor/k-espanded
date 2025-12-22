@@ -1,5 +1,6 @@
 """Global hotkey listener using pynput GlobalHotKeys."""
 
+import logging
 import threading
 from typing import Callable
 
@@ -14,9 +15,10 @@ except ImportError:
     Key = None
     KeyCode = None
 
+logger = logging.getLogger(__name__)
 
-# Default hotkey
-DEFAULT_HOTKEY = "<ctrl>+<alt>+`"
+# Default hotkey (using 'e' instead of backtick - backtick has issues on Windows)
+DEFAULT_HOTKEY = "<ctrl>+<alt>+e"
 
 
 def normalize_hotkey(hotkey_string: str) -> str:
@@ -292,3 +294,125 @@ def get_hotkey_listener() -> HotkeyListener | None:
         _listener_instance = HotkeyListener()
 
     return _listener_instance
+
+
+class KeystrokeMonitor:
+    """Monitors all keystrokes for autocomplete functionality.
+
+    Unlike HotkeyListener which listens for specific combinations,
+    this class monitors every keystroke to detect trigger characters
+    and filter text for the autocomplete feature.
+    """
+
+    def __init__(self, on_key_press: Callable | None = None):
+        """Initialize the keystroke monitor.
+
+        Args:
+            on_key_press: Callback for key presses. Called with (key, char)
+                         where char is the character if printable, None otherwise.
+        """
+        if not PYNPUT_AVAILABLE:
+            raise ImportError(
+                "pynput is required for keystroke monitoring. "
+                "Install with: pip install pynput"
+            )
+
+        self._on_key_press = on_key_press
+        self._listener = None
+        self._running = False
+        self._enabled = True
+
+    def set_callback(self, on_key_press: Callable):
+        """Set the key press callback.
+
+        Args:
+            on_key_press: Callback for key presses. Called with (key, char).
+        """
+        self._on_key_press = on_key_press
+
+    def start(self):
+        """Start monitoring keystrokes."""
+        if self._running:
+            return
+
+        def on_press(key):
+            if not self._enabled or not self._on_key_press:
+                return
+
+            try:
+                # Get the character if it's a printable key
+                char = None
+                if isinstance(key, KeyCode):
+                    if key.char:
+                        char = key.char
+                    elif key.vk is not None:
+                        # Try to get character from virtual key code
+                        # This handles some edge cases
+                        pass
+
+                self._on_key_press(key, char)
+
+            except Exception as e:
+                logger.error(f"Error in keystroke callback: {e}")
+
+        try:
+            self._listener = keyboard.Listener(on_press=on_press)
+            self._listener.start()
+            self._running = True
+            logger.info("Keystroke monitor started")
+        except PermissionError as e:
+            logger.error(f"Permission error starting keystroke monitor: {e}")
+            self._listener = None
+        except Exception as e:
+            logger.error(f"Error starting keystroke monitor: {e}")
+            self._listener = None
+
+    def stop(self):
+        """Stop monitoring keystrokes."""
+        self._running = False
+        if self._listener:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+            self._listener = None
+        logger.info("Keystroke monitor stopped")
+
+    def enable(self):
+        """Enable keystroke handling."""
+        self._enabled = True
+
+    def disable(self):
+        """Disable keystroke handling (listener still runs but ignores keys)."""
+        self._enabled = False
+
+    @property
+    def is_enabled(self) -> bool:
+        """Check if monitoring is enabled."""
+        return self._enabled
+
+    @property
+    def is_running(self) -> bool:
+        """Check if monitor is running."""
+        return self._running
+
+
+# Keystroke monitor singleton
+_keystroke_monitor: KeystrokeMonitor | None = None
+
+
+def get_keystroke_monitor() -> KeystrokeMonitor | None:
+    """Get the global keystroke monitor instance.
+
+    Returns:
+        KeystrokeMonitor instance or None if pynput is not available.
+    """
+    global _keystroke_monitor
+
+    if not PYNPUT_AVAILABLE:
+        return None
+
+    if _keystroke_monitor is None:
+        _keystroke_monitor = KeystrokeMonitor()
+
+    return _keystroke_monitor

@@ -96,15 +96,7 @@ class HistoryView(QWidget):
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(12)
 
-        icon_label = QLabel("\u1F4DC")  # Scroll emoji
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 24px;
-                color: {colors.primary};
-                background-color: transparent;
-            }}
-        """)
-        title_layout.addWidget(icon_label)
+        # Title without icon for cross-platform compatibility
 
         title = QLabel("History")
         title_font = QFont()
@@ -443,17 +435,6 @@ class HistoryView(QWidget):
         empty_layout = QVBoxLayout(empty)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.setSpacing(8)
-
-        icon_label = QLabel("\u1F4DC")
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 64px;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-            }}
-        """)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(icon_label)
 
         msg_label = QLabel("No history found")
         msg_label.setStyleSheet(f"""

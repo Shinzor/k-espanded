@@ -25,13 +25,13 @@ from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
 
 
-# Trigger prefix options
+# Trigger prefix options - just the characters
 TRIGGER_PREFIXES = [
-    (":", "Colon (default)"),
-    (";", "Semicolon"),
-    ("//", "Double slash"),
-    ("::", "Double colon"),
-    ("", "None (blank)"),
+    (":", ":"),
+    (";", ";"),
+    ("//", "//"),
+    ("::", "::"),
+    ("", "(none)"),
 ]
 
 # Variable categories for insertion
@@ -84,6 +84,9 @@ class EntryEditor(QWidget):
         """Build the entry editor layout."""
         colors = self.theme_manager.colors
 
+        # Set background for entire widget
+        self.setStyleSheet(f"background-color: {colors.bg_base};")
+
         # Main layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -117,33 +120,14 @@ class EntryEditor(QWidget):
         colors = self.theme_manager.colors
 
         header = QWidget()
-        header.setStyleSheet(f"""
-            QWidget {{
-                background-color: {colors.bg_base};
-            }}
-        """)
+        header.setStyleSheet(f"background-color: {colors.bg_base};")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(20, 20, 20, 0)
+        header_layout.setContentsMargins(24, 24, 24, 0)
 
-        # Icon and title
-        title_row = QWidget()
-        title_layout = QHBoxLayout(title_row)
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(10)
-
-        icon_label = QLabel("\u270F")  # Pencil emoji
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 20px;
-                color: {colors.primary};
-                background-color: transparent;
-            }}
-        """)
-        title_layout.addWidget(icon_label)
-
+        # Title
         self.header_text = QLabel("New Entry")
         title_font = QFont()
-        title_font.setPointSize(14)
+        title_font.setPointSize(16)
         title_font.setBold(True)
         self.header_text.setFont(title_font)
         self.header_text.setStyleSheet(f"""
@@ -152,13 +136,11 @@ class EntryEditor(QWidget):
                 background-color: transparent;
             }}
         """)
-        title_layout.addWidget(self.header_text)
-
-        header_layout.addWidget(title_row)
+        header_layout.addWidget(self.header_text)
         header_layout.addStretch()
 
         # Close button
-        close_btn = QPushButton("\u2715")  # X symbol
+        close_btn = QPushButton("X")
         close_btn.setFixedSize(32, 32)
         close_btn.clicked.connect(self.close_requested.emit)
         close_btn.setStyleSheet(f"""
@@ -167,10 +149,12 @@ class EntryEditor(QWidget):
                 color: {colors.text_secondary};
                 border: none;
                 border-radius: 4px;
-                font-size: 16px;
+                font-size: 14px;
+                font-weight: 600;
             }}
             QPushButton:hover {{
                 background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
             }}
         """)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -183,22 +167,18 @@ class EntryEditor(QWidget):
         colors = self.theme_manager.colors
 
         actions = QWidget()
-        actions.setStyleSheet(f"""
-            QWidget {{
-                background-color: {colors.bg_base};
-                border-bottom: 1px solid {colors.border_muted};
-            }}
-        """)
+        actions.setStyleSheet(f"background-color: {colors.bg_base};")
         actions_layout = QHBoxLayout(actions)
-        actions_layout.setContentsMargins(20, 16, 20, 16)
+        actions_layout.setContentsMargins(24, 16, 24, 16)
 
         # Left side buttons (Delete, Clone)
         left_buttons = QWidget()
+        left_buttons.setStyleSheet("background-color: transparent;")
         left_layout = QHBoxLayout(left_buttons)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        self.delete_btn = QPushButton("\u1F5D1 Delete")
+        self.delete_btn = QPushButton("Delete")
         self.delete_btn.clicked.connect(self._on_delete_click)
         self.delete_btn.setStyleSheet(f"""
             QPushButton {{
@@ -217,7 +197,7 @@ class EntryEditor(QWidget):
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         left_layout.addWidget(self.delete_btn)
 
-        self.clone_btn = QPushButton("\u2398 Clone")
+        self.clone_btn = QPushButton("Clone")
         self.clone_btn.clicked.connect(self._on_clone_click)
         self.clone_btn.setStyleSheet(f"""
             QPushButton {{
@@ -231,6 +211,7 @@ class EntryEditor(QWidget):
             QPushButton:hover {{
                 background-color: {colors.bg_elevated};
                 border-color: {colors.primary};
+                color: {colors.text_primary};
             }}
         """)
         self.clone_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -240,7 +221,7 @@ class EntryEditor(QWidget):
         actions_layout.addStretch()
 
         # Save button
-        self.save_btn = QPushButton("\u1F4BE Save")
+        self.save_btn = QPushButton("Save Entry")
         self.save_btn.clicked.connect(self._on_save_click)
         self.save_btn.setStyleSheet(f"""
             QPushButton {{
@@ -248,9 +229,9 @@ class EntryEditor(QWidget):
                 color: {colors.text_inverse};
                 border: none;
                 border-radius: 6px;
-                padding: 8px 24px;
-                font-size: 13px;
-                font-weight: 500;
+                padding: 10px 28px;
+                font-size: 14px;
+                font-weight: 600;
             }}
             QPushButton:hover {{
                 background-color: {colors.primary_hover};
@@ -262,203 +243,313 @@ class EntryEditor(QWidget):
         return actions
 
     def _create_form(self) -> QWidget:
-        """Create the entry form."""
+        """Create the entry form with card sections."""
         colors = self.theme_manager.colors
 
         form = QWidget()
+        form.setStyleSheet(f"background-color: {colors.bg_base};")
         form_layout = QVBoxLayout(form)
-        form_layout.setContentsMargins(20, 16, 20, 20)
+        form_layout.setContentsMargins(24, 8, 24, 24)
         form_layout.setSpacing(16)
 
-        # Trigger section
-        trigger_section = self._create_trigger_section()
-        form_layout.addWidget(trigger_section)
+        # Trigger Card
+        trigger_card = self._create_card("Trigger", self._create_trigger_content())
+        form_layout.addWidget(trigger_card)
 
-        # Replacement section
-        replacement_section = self._create_replacement_section()
-        form_layout.addWidget(replacement_section)
+        # Replacement Card
+        replacement_card = self._create_card("Replacement", self._create_replacement_content())
+        form_layout.addWidget(replacement_card)
 
-        # Tags section
-        tags_section = self._create_tags_section()
-        form_layout.addWidget(tags_section)
+        # Tags Card
+        tags_card = self._create_card("Tags", self._create_tags_content())
+        form_layout.addWidget(tags_card)
 
-        # Advanced options (collapsible)
-        self.advanced_section = self._create_advanced_section()
-        form_layout.addWidget(self.advanced_section)
+        # Advanced Options Card (collapsible)
+        self.advanced_card = self._create_advanced_card()
+        form_layout.addWidget(self.advanced_card)
 
         form_layout.addStretch()
 
         return form
 
-    def _create_trigger_section(self) -> QWidget:
-        """Create trigger input section."""
+    def _create_card(self, title: str, content: QWidget) -> QFrame:
+        """Create a card with title and content."""
         colors = self.theme_manager.colors
 
-        section = QWidget()
-        section_layout = QVBoxLayout(section)
-        section_layout.setContentsMargins(0, 0, 0, 0)
-        section_layout.setSpacing(6)
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border-radius: 12px;
+            }}
+        """)
 
-        # Label
-        label = QLabel("Trigger")
-        label_font = QFont()
-        label_font.setPointSize(10)
-        label_font.setBold(True)
-        label.setFont(label_font)
-        label.setStyleSheet(f"""
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 16, 20, 20)
+        layout.setSpacing(12)
+
+        # Title
+        title_label = QLabel(title)
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet(f"""
             QLabel {{
-                color: {colors.text_secondary};
+                color: {colors.text_primary};
                 background-color: transparent;
             }}
         """)
-        section_layout.addWidget(label)
+        layout.addWidget(title_label)
 
-        # Prefix dropdown and trigger input
+        # Content
+        content.setStyleSheet(f"background-color: transparent;")
+        layout.addWidget(content)
+
+        return card
+
+    def _create_trigger_content(self) -> QWidget:
+        """Create trigger input content."""
+        colors = self.theme_manager.colors
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+
+        # Description
+        desc = QLabel("The text that triggers the expansion")
+        desc.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(desc)
+
+        # Trigger input row: "Trigger:" label + prefix dropdown + text input
         input_row = QWidget()
+        input_row.setStyleSheet("background-color: transparent;")
         input_layout = QHBoxLayout(input_row)
         input_layout.setContentsMargins(0, 0, 0, 0)
         input_layout.setSpacing(8)
 
-        self.prefix_dropdown = QComboBox()
-        for prefix, display in TRIGGER_PREFIXES:
-            self.prefix_dropdown.addItem(display if prefix else "(none)", prefix)
-        self.prefix_dropdown.setCurrentIndex(0)  # Default to ":"
-        self.prefix_dropdown.setFixedWidth(140)
-        input_layout.addWidget(self.prefix_dropdown)
-
-        self.trigger_field = QLineEdit()
-        self.trigger_field.setPlaceholderText("Enter trigger text...")
-        input_layout.addWidget(self.trigger_field, stretch=1)
-
-        section_layout.addWidget(input_row)
-
-        return section
-
-    def _create_replacement_section(self) -> QWidget:
-        """Create replacement text section."""
-        colors = self.theme_manager.colors
-
-        section = QWidget()
-        section_layout = QVBoxLayout(section)
-        section_layout.setContentsMargins(0, 0, 0, 0)
-        section_layout.setSpacing(6)
-
-        # Header with label and buttons
-        header = QWidget()
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-
-        label = QLabel("Replacement")
-        label_font = QFont()
-        label_font.setPointSize(10)
-        label_font.setBold(True)
-        label.setFont(label_font)
-        label.setStyleSheet(f"""
+        # Trigger label
+        trigger_label = QLabel("Trigger:")
+        trigger_label.setStyleSheet(f"""
             QLabel {{
+                font-size: 13px;
                 color: {colors.text_secondary};
                 background-color: transparent;
             }}
         """)
-        header_layout.addWidget(label)
+        input_layout.addWidget(trigger_label)
+
+        # Prefix dropdown (compact, just shows the character)
+        self.prefix_dropdown = QComboBox()
+        for prefix, display in TRIGGER_PREFIXES:
+            self.prefix_dropdown.addItem(display, prefix)
+        self.prefix_dropdown.setCurrentIndex(0)
+        self.prefix_dropdown.setFixedWidth(70)
+        self.prefix_dropdown.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            QComboBox:focus {{
+                border-color: {colors.primary};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                selection-background-color: {colors.entry_selected};
+            }}
+        """)
+        input_layout.addWidget(self.prefix_dropdown)
+
+        # Trigger text field
+        self.trigger_field = QLineEdit()
+        self.trigger_field.setPlaceholderText("e.g., addr, sig, hello")
+        self.trigger_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
+        input_layout.addWidget(self.trigger_field, stretch=1)
+
+        content_layout.addWidget(input_row)
+
+        return content
+
+    def _create_replacement_content(self) -> QWidget:
+        """Create replacement text content."""
+        colors = self.theme_manager.colors
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+
+        # Header with description and insert button
+        header = QWidget()
+        header.setStyleSheet("background-color: transparent;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        desc = QLabel("The text that will replace the trigger")
+        desc.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        header_layout.addWidget(desc)
         header_layout.addStretch()
 
         # Insert variable button
-        insert_var_btn = QPushButton("\u007B\u007B Insert Variable")
+        insert_var_btn = QPushButton("+ Insert Variable")
         insert_var_btn.clicked.connect(self._show_variable_menu)
         insert_var_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: transparent;
+                background-color: {colors.primary_muted};
                 color: {colors.primary};
                 border: none;
-                padding: 4px 8px;
+                border-radius: 4px;
+                padding: 6px 12px;
                 font-size: 12px;
+                font-weight: 500;
             }}
             QPushButton:hover {{
-                text-decoration: underline;
+                background-color: {colors.entry_selected};
             }}
         """)
         insert_var_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         header_layout.addWidget(insert_var_btn)
 
-        section_layout.addWidget(header)
+        content_layout.addWidget(header)
 
         # Text editor
         self.replacement_field = QTextEdit()
-        self.replacement_field.setPlaceholderText("Enter replacement text...\n\nType {{ to insert variables and forms")
-        self.replacement_field.setMinimumHeight(120)
+        self.replacement_field.setPlaceholderText("Enter replacement text...\n\nTip: Use {{ to insert variables and forms")
+        self.replacement_field.setMinimumHeight(140)
         self.replacement_field.setMaximumHeight(200)
         font = QFont("Consolas, Monaco, monospace")
-        font.setPointSize(10)
+        font.setPointSize(11)
         self.replacement_field.setFont(font)
-        section_layout.addWidget(self.replacement_field)
+        self.replacement_field.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 8px;
+                padding: 12px;
+            }}
+            QTextEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
+        content_layout.addWidget(self.replacement_field)
 
-        return section
+        return content
 
-    def _create_tags_section(self) -> QWidget:
-        """Create tags input section."""
+    def _create_tags_content(self) -> QWidget:
+        """Create tags input content."""
         colors = self.theme_manager.colors
 
-        section = QWidget()
-        section_layout = QVBoxLayout(section)
-        section_layout.setContentsMargins(0, 0, 0, 0)
-        section_layout.setSpacing(8)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
 
-        # Label
-        label = QLabel("Tags")
-        label_font = QFont()
-        label_font.setPointSize(10)
-        label_font.setBold(True)
-        label.setFont(label_font)
-        label.setStyleSheet(f"""
+        # Description
+        desc = QLabel("Organize entries with tags for easy filtering")
+        desc.setStyleSheet(f"""
             QLabel {{
-                color: {colors.text_secondary};
+                font-size: 12px;
+                color: {colors.text_tertiary};
                 background-color: transparent;
             }}
         """)
-        section_layout.addWidget(label)
+        content_layout.addWidget(desc)
 
-        # Tags display and input
+        # Tags display and input row
         tags_row = QWidget()
+        tags_row.setStyleSheet("background-color: transparent;")
         tags_layout = QHBoxLayout(tags_row)
         tags_layout.setContentsMargins(0, 0, 0, 0)
         tags_layout.setSpacing(8)
 
         # Tags container (will hold tag chips)
         self.tags_container = QWidget()
+        self.tags_container.setStyleSheet("background-color: transparent;")
         self.tags_layout = QHBoxLayout(self.tags_container)
         self.tags_layout.setContentsMargins(0, 0, 0, 0)
-        self.tags_layout.setSpacing(4)
+        self.tags_layout.setSpacing(6)
         self.tags_layout.addStretch()
         tags_layout.addWidget(self.tags_container, stretch=1)
 
         # Add tag input
         self.add_tag_field = QLineEdit()
         self.add_tag_field.setPlaceholderText("Add tag...")
-        self.add_tag_field.setFixedWidth(120)
+        self.add_tag_field.setFixedWidth(140)
         self.add_tag_field.returnPressed.connect(self._on_add_tag)
-        tags_layout.addWidget(self.add_tag_field)
-
-        section_layout.addWidget(tags_row)
-
-        return section
-
-    def _create_advanced_section(self) -> QWidget:
-        """Create advanced options section (collapsible)."""
-        colors = self.theme_manager.colors
-
-        section = QWidget()
-        section.setStyleSheet(f"""
-            QWidget {{
-                border-top: 1px solid {colors.border_muted};
-                padding-top: 8px;
+        self.add_tag_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
             }}
         """)
-        section_layout = QVBoxLayout(section)
-        section_layout.setContentsMargins(0, 8, 0, 0)
-        section_layout.setSpacing(0)
+        tags_layout.addWidget(self.add_tag_field)
+
+        content_layout.addWidget(tags_row)
+
+        return content
+
+    def _create_advanced_card(self) -> QFrame:
+        """Create advanced options card (collapsible)."""
+        colors = self.theme_manager.colors
+
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border-radius: 12px;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(0)
 
         # Toggle header
-        self.advanced_toggle = QPushButton("\u25B6 Advanced Options")
+        self.advanced_toggle = QPushButton("Advanced Options")
         self.advanced_toggle.setCheckable(True)
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
         self.advanced_toggle.setStyleSheet(f"""
@@ -467,108 +558,149 @@ class EntryEditor(QWidget):
                 color: {colors.text_secondary};
                 border: none;
                 text-align: left;
-                padding: 8px 0px;
+                padding: 4px 0px;
                 font-size: 13px;
-                font-weight: 500;
+                font-weight: 600;
             }}
             QPushButton:hover {{
                 color: {colors.text_primary};
             }}
         """)
         self.advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        section_layout.addWidget(self.advanced_toggle)
+        layout.addWidget(self.advanced_toggle)
 
         # Advanced content (hidden by default)
         self.advanced_content = QWidget()
         self.advanced_content.setVisible(False)
+        self.advanced_content.setStyleSheet("background-color: transparent;")
         content_layout = QVBoxLayout(self.advanced_content)
-        content_layout.setContentsMargins(16, 8, 0, 0)
-        content_layout.setSpacing(6)
+        content_layout.setContentsMargins(0, 16, 0, 0)
+        content_layout.setSpacing(16)
 
-        # Trigger Settings
-        trigger_label = QLabel("Trigger Settings")
-        trigger_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 11px;
-                font-weight: 500;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-            }}
-        """)
-        content_layout.addWidget(trigger_label)
+        # Trigger Settings Group
+        trigger_group = self._create_options_group("Trigger Settings", [
+            ("word_trigger_cb", "Word trigger (expand at word boundaries)", True),
+            ("propagate_case_cb", "Propagate case (match input casing)", False),
+        ])
+        content_layout.addWidget(trigger_group)
 
-        self.word_trigger_cb = QCheckBox("Word trigger (expand at word boundaries)")
-        self.word_trigger_cb.setChecked(True)
-        content_layout.addWidget(self.word_trigger_cb)
+        # Matching Group
+        matching_group = self._create_options_group("Matching", [
+            ("regex_cb", "Regex trigger", False),
+            ("case_insensitive_cb", "Case insensitive matching", False),
+        ])
+        content_layout.addWidget(matching_group)
 
-        self.propagate_case_cb = QCheckBox("Propagate case (match input casing)")
-        content_layout.addWidget(self.propagate_case_cb)
-
-        # Matching
-        matching_label = QLabel("Matching")
-        matching_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 11px;
-                font-weight: 500;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-                margin-top: 8px;
-            }}
-        """)
-        content_layout.addWidget(matching_label)
-
-        self.regex_cb = QCheckBox("Regex trigger")
-        content_layout.addWidget(self.regex_cb)
-
-        self.case_insensitive_cb = QCheckBox("Case insensitive matching")
-        content_layout.addWidget(self.case_insensitive_cb)
-
-        # Behavior
-        behavior_label = QLabel("Behavior")
-        behavior_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 11px;
-                font-weight: 500;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-                margin-top: 8px;
-            }}
-        """)
-        content_layout.addWidget(behavior_label)
-
-        self.force_clipboard_cb = QCheckBox("Force clipboard paste")
-        content_layout.addWidget(self.force_clipboard_cb)
-
-        self.passive_cb = QCheckBox("Passive mode (manual trigger only)")
-        content_layout.addWidget(self.passive_cb)
+        # Behavior Group
+        behavior_group = self._create_options_group("Behavior", [
+            ("force_clipboard_cb", "Force clipboard paste", False),
+            ("passive_cb", "Passive mode (manual trigger only)", False),
+        ])
+        content_layout.addWidget(behavior_group)
 
         # App Filtering
-        filtering_label = QLabel("App Filtering")
-        filtering_label.setStyleSheet(f"""
+        filter_section = QWidget()
+        filter_section.setStyleSheet("background-color: transparent;")
+        filter_layout = QVBoxLayout(filter_section)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(6)
+
+        filter_label = QLabel("App Filtering")
+        filter_label.setStyleSheet(f"""
             QLabel {{
                 font-size: 11px;
-                font-weight: 500;
+                font-weight: 600;
                 color: {colors.text_tertiary};
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
                 background-color: transparent;
-                margin-top: 8px;
             }}
         """)
-        content_layout.addWidget(filtering_label)
+        filter_layout.addWidget(filter_label)
 
         self.filter_apps_field = QLineEdit()
         self.filter_apps_field.setPlaceholderText("chrome, slack, vscode (comma-separated)")
-        content_layout.addWidget(self.filter_apps_field)
+        self.filter_apps_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
+        filter_layout.addWidget(self.filter_apps_field)
 
-        section_layout.addWidget(self.advanced_content)
+        content_layout.addWidget(filter_section)
 
-        return section
+        layout.addWidget(self.advanced_content)
+
+        return card
+
+    def _create_options_group(self, title: str, options: list) -> QWidget:
+        """Create a group of checkbox options."""
+        colors = self.theme_manager.colors
+
+        group = QWidget()
+        group.setStyleSheet("background-color: transparent;")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Group title
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                font-weight: 600;
+                color: {colors.text_tertiary};
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                background-color: transparent;
+            }}
+        """)
+        layout.addWidget(title_label)
+
+        # Checkboxes
+        for attr_name, label, default in options:
+            cb = QCheckBox(label)
+            cb.setChecked(default)
+            cb.setStyleSheet(f"""
+                QCheckBox {{
+                    color: {colors.text_primary};
+                    spacing: 8px;
+                    background-color: transparent;
+                }}
+                QCheckBox::indicator {{
+                    width: 18px;
+                    height: 18px;
+                    border: 2px solid {colors.border_default};
+                    border-radius: 4px;
+                    background-color: {colors.bg_elevated};
+                }}
+                QCheckBox::indicator:checked {{
+                    background-color: {colors.primary};
+                    border-color: {colors.primary};
+                }}
+                QCheckBox::indicator:hover {{
+                    border-color: {colors.primary};
+                }}
+            """)
+            setattr(self, attr_name, cb)
+            layout.addWidget(cb)
+
+        return group
 
     def _toggle_advanced(self):
         """Toggle advanced options visibility."""
         is_visible = self.advanced_content.isVisible()
         self.advanced_content.setVisible(not is_visible)
-        icon = "\u25BC" if not is_visible else "\u25B6"
-        self.advanced_toggle.setText(f"{icon} Advanced Options")
+        arrow = "v" if not is_visible else ">"
+        self.advanced_toggle.setText(f"{arrow} Advanced Options")
 
     def _show_variable_menu(self):
         """Show variable insertion menu."""
@@ -634,11 +766,10 @@ class EntryEditor(QWidget):
             QWidget {{
                 background-color: {colors.tag_bg};
                 border-radius: 12px;
-                padding: 4px 8px;
             }}
         """)
         chip_layout = QHBoxLayout(chip)
-        chip_layout.setContentsMargins(8, 4, 4, 4)
+        chip_layout.setContentsMargins(10, 4, 6, 4)
         chip_layout.setSpacing(4)
 
         tag_label = QLabel(tag)
@@ -651,7 +782,7 @@ class EntryEditor(QWidget):
         """)
         chip_layout.addWidget(tag_label)
 
-        remove_btn = QPushButton("\u2715")
+        remove_btn = QPushButton("x")
         remove_btn.setFixedSize(16, 16)
         remove_btn.clicked.connect(lambda: self._remove_tag_chip(chip))
         remove_btn.setStyleSheet(f"""
@@ -660,6 +791,7 @@ class EntryEditor(QWidget):
                 color: {colors.tag_text};
                 border: none;
                 font-size: 10px;
+                font-weight: 600;
                 padding: 0px;
             }}
             QPushButton:hover {{

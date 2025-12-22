@@ -94,15 +94,7 @@ class TrashView(QWidget):
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(12)
 
-        icon_label = QLabel("\u1F5D1")  # Trash emoji
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 24px;
-                color: {colors.primary};
-                background-color: transparent;
-            }}
-        """)
-        title_layout.addWidget(icon_label)
+        # Title without icon for cross-platform compatibility
 
         title = QLabel("Trash")
         title_font = QFont()
@@ -173,7 +165,7 @@ class TrashView(QWidget):
         toolbar_layout.addWidget(self.search_field, stretch=1)
 
         # Empty trash button
-        self.empty_trash_button = QPushButton("\u1F5D1 Empty Trash")
+        self.empty_trash_button = QPushButton("Empty Trash")
         self.empty_trash_button.clicked.connect(self._on_empty_trash)
         self.empty_trash_button.setStyleSheet(f"""
             QPushButton {{
@@ -395,17 +387,6 @@ class TrashView(QWidget):
         empty_layout = QVBoxLayout(empty)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.setSpacing(8)
-
-        icon_label = QLabel("\u1F5D1")
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 64px;
-                color: {colors.text_tertiary};
-                background-color: transparent;
-            }}
-        """)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(icon_label)
 
         msg_label = QLabel("Trash is empty")
         msg_label.setStyleSheet(f"""

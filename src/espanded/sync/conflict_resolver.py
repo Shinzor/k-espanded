@@ -24,21 +24,16 @@ class FileConflict:
     remote_content: str | None
     local_modified: datetime | None
     remote_modified: datetime | None
-    conflict_type: str  # "both_modified", "local_deleted", "remote_deleted"
+    conflict_type: str  # "both_modified" - only type now (single-side files are not conflicts)
 
     @property
     def is_major_conflict(self) -> bool:
         """Check if this is a major conflict requiring user intervention.
 
-        Major conflicts occur when:
-        - Both versions modified within 1 minute of each other
-        - File deleted on one side but modified on other
+        Major conflicts occur when both versions were modified within
+        1 minute of each other (making timestamp-based resolution unreliable).
         """
-        # Deletion conflicts are always major
-        if self.conflict_type in ("local_deleted", "remote_deleted"):
-            return True
-
-        # Both modified - check if within 1 minute threshold
+        # Both modified within 1 minute - timestamps too close to auto-resolve
         if (
             self.local_modified
             and self.remote_modified
@@ -51,35 +46,33 @@ class FileConflict:
     def get_suggested_resolution(self) -> ConflictResolution:
         """Get suggested resolution based on timestamps.
 
+        For "both_modified" conflicts, the newer version wins.
+        If timestamps are within 1 minute, it's a major conflict requiring manual resolution.
+
         Returns:
             ConflictResolution.KEEP_LOCAL if local is newer
             ConflictResolution.KEEP_REMOTE if remote is newer
-            ConflictResolution.MANUAL if timestamps are equal or conflict is major
+            ConflictResolution.MANUAL if timestamps are too close to auto-resolve
         """
-        # Major conflicts require manual resolution
-        if self.is_major_conflict:
-            return ConflictResolution.MANUAL
-
-        # Deletion conflicts
-        if self.conflict_type == "local_deleted":
-            # Local deleted, remote modified - keep remote (restore file)
-            return ConflictResolution.KEEP_REMOTE
-        if self.conflict_type == "remote_deleted":
-            # Remote deleted, local modified - keep local (push deletion)
-            return ConflictResolution.KEEP_LOCAL
-
-        # Compare timestamps for "both_modified"
+        # Compare timestamps - newer wins
         if self.local_modified and self.remote_modified:
-            if self.local_modified > self.remote_modified:
-                return ConflictResolution.KEEP_LOCAL
-            elif self.remote_modified > self.local_modified:
-                return ConflictResolution.KEEP_REMOTE
-            else:
-                # Equal timestamps - require manual resolution
+            # If timestamps are within 1 minute, require manual resolution
+            if abs(self.local_modified - self.remote_modified) < timedelta(minutes=1):
                 return ConflictResolution.MANUAL
 
-        # Fallback to manual
-        return ConflictResolution.MANUAL
+            if self.local_modified > self.remote_modified:
+                return ConflictResolution.KEEP_LOCAL
+            else:
+                return ConflictResolution.KEEP_REMOTE
+
+        # If we can't compare timestamps, keep local (safer default)
+        if self.local_modified:
+            return ConflictResolution.KEEP_LOCAL
+        if self.remote_modified:
+            return ConflictResolution.KEEP_REMOTE
+
+        # Fallback - keep local
+        return ConflictResolution.KEEP_LOCAL
 
 
 class ConflictResolver:
@@ -93,29 +86,36 @@ class ConflictResolver:
         self,
         local_files: dict[str, tuple[str, datetime]],
         remote_files: dict[str, tuple[str, datetime]],
+        last_sync: datetime | None = None,
     ) -> list[FileConflict]:
         """Detect conflicts between local and remote files.
+
+        Only files that exist on BOTH sides with different content are conflicts.
+        Files that only exist on one side are NOT conflicts - they are simply
+        new files to be synced and are handled separately by the sync manager.
 
         Args:
             local_files: Dict of {path: (content, modified_time)}
             remote_files: Dict of {path: (content, modified_time)}
+            last_sync: Last sync timestamp (used to detect deletion conflicts)
 
         Returns:
             List of detected conflicts
         """
         conflicts = []
-        all_paths = set(local_files.keys()) | set(remote_files.keys())
 
-        for path in all_paths:
+        # Only check files that exist on BOTH sides
+        common_paths = set(local_files.keys()) & set(remote_files.keys())
+
+        for path in common_paths:
             local_data = local_files.get(path)
             remote_data = remote_files.get(path)
 
-            # Both exist - check if modified
             if local_data and remote_data:
                 local_content, local_time = local_data
                 remote_content, remote_time = remote_data
 
-                # Content differs - conflict
+                # Content differs - this is a real conflict
                 if local_content != remote_content:
                     conflicts.append(
                         FileConflict(
@@ -128,33 +128,10 @@ class ConflictResolver:
                         )
                     )
 
-            # Only local exists - remote deleted
-            elif local_data and not remote_data:
-                local_content, local_time = local_data
-                conflicts.append(
-                    FileConflict(
-                        path=path,
-                        local_content=local_content,
-                        remote_content=None,
-                        local_modified=local_time,
-                        remote_modified=None,
-                        conflict_type="remote_deleted",
-                    )
-                )
-
-            # Only remote exists - local deleted
-            elif remote_data and not local_data:
-                remote_content, remote_time = remote_data
-                conflicts.append(
-                    FileConflict(
-                        path=path,
-                        local_content=None,
-                        remote_content=remote_content,
-                        local_modified=None,
-                        remote_modified=remote_time,
-                        conflict_type="local_deleted",
-                    )
-                )
+        # Note: Files that only exist on one side are NOT conflicts.
+        # - Local-only files: new files to push to remote
+        # - Remote-only files: new files to pull to local
+        # These are handled by sync_manager.sync() in the "Sync files without conflicts" section.
 
         self.conflicts = conflicts
         return conflicts
@@ -223,8 +200,9 @@ class ConflictResolver:
             return conflict.local_content or conflict.remote_content
 
         elif resolution == ConflictResolution.MANUAL:
-            # Manual resolution should be handled by caller
-            raise ValueError("Manual resolution must be handled by user")
+            # Manual resolution - caller should have converted this to a concrete resolution
+            # If we get here, default to keeping local version (safer)
+            return conflict.local_content
 
         return None
 

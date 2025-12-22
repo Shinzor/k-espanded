@@ -14,6 +14,8 @@ from espanded.ui.main_window import MainWindow
 from espanded.ui.system_tray import SystemTray
 from espanded.ui.quick_add import QuickAddPopup
 from espanded.services.hotkey_service import get_hotkey_service
+from espanded.services.autocomplete_service import init_autocomplete_service, get_autocomplete_service
+from espanded.hotkeys.listener import get_keystroke_monitor
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +54,8 @@ def create_app() -> tuple[MainWindow | None, dict]:
 
     services = {
         'hotkey_service': None,
+        'autocomplete_service': None,
+        'keystroke_monitor': None,
         'sync_manager': None,
         'tray': None,
         'cleanup_func': None,
@@ -85,7 +89,7 @@ def create_app() -> tuple[MainWindow | None, dict]:
 
     # Initialize hotkey service
     try:
-        print("[4/7] Initializing hotkey service...")
+        print("[4/8] Initializing hotkey service...")
         hotkey_service = get_hotkey_service()
         if hotkey_service.is_available:
             # Use the quick add hotkey from settings
@@ -104,9 +108,41 @@ def create_app() -> tuple[MainWindow | None, dict]:
         traceback.print_exc()
         # Continue without hotkeys
 
+    # Initialize autocomplete service (inline suggestions)
+    try:
+        print("[5/8] Initializing autocomplete service...")
+        autocomplete_service = None
+        keystroke_monitor = None
+
+        if settings.autocomplete_enabled:
+            # Initialize the autocomplete service
+            autocomplete_service = init_autocomplete_service(app_state, theme_manager)
+
+            # Get and configure the keystroke monitor
+            keystroke_monitor = get_keystroke_monitor()
+            if keystroke_monitor:
+                # Set the callback to route keystrokes to autocomplete service
+                keystroke_monitor.set_callback(autocomplete_service.on_key_press)
+                keystroke_monitor.start()
+                print(f"✓ Autocomplete service started with triggers: {settings.autocomplete_triggers}")
+            else:
+                print("⚠ Keystroke monitor not available")
+
+            # Start the autocomplete service
+            autocomplete_service.start()
+        else:
+            print("✓ Autocomplete service skipped (disabled in settings)")
+
+        services['autocomplete_service'] = autocomplete_service
+        services['keystroke_monitor'] = keystroke_monitor
+    except Exception as e:
+        print(f"⚠ WARNING: Autocomplete service initialization failed: {e}")
+        traceback.print_exc()
+        # Continue without autocomplete
+
     # Initialize sync manager (if available and configured)
     try:
-        print("[5/7] Initializing sync manager...")
+        print("[6/8] Initializing sync manager...")
         sync_manager = None
         if SYNC_AVAILABLE and SyncManager and settings.github_repo and settings.github_token:
             try:
@@ -146,7 +182,7 @@ def create_app() -> tuple[MainWindow | None, dict]:
 
     # Initialize system tray (Qt-based)
     try:
-        print("[6/7] Initializing system tray...")
+        print("[7/8] Initializing system tray...")
         tray = None
         # Always create tray if minimize_to_tray is enabled
         # (Qt system tray is always available, doesn't depend on pystray)
@@ -164,6 +200,14 @@ def create_app() -> tuple[MainWindow | None, dict]:
 
     def cleanup_and_exit():
         """Cleanup resources and exit."""
+        # Stop keystroke monitor
+        if services['keystroke_monitor']:
+            services['keystroke_monitor'].stop()
+
+        # Stop autocomplete service
+        if services['autocomplete_service']:
+            services['autocomplete_service'].stop()
+
         # Stop hotkey service
         if services['hotkey_service']:
             services['hotkey_service'].stop()
@@ -183,7 +227,7 @@ def create_app() -> tuple[MainWindow | None, dict]:
 
     # Create main window
     try:
-        print("[7/7] Creating main window...")
+        print("[8/8] Creating main window...")
         main_window = MainWindow(
             theme_manager,
             tray=services['tray'],

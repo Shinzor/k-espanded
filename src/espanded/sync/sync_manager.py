@@ -178,14 +178,19 @@ class SyncManager:
         finally:
             self.is_syncing = False
 
-    def sync(self) -> dict[str, str]:
+    def sync(self) -> dict:
         """Perform bidirectional sync with conflict resolution.
 
         Returns:
-            Dict of {file_path: status}
+            Dict with keys:
+                - success: bool
+                - pushed: int (number of files pushed)
+                - pulled: int (number of files pulled)
+                - files: dict of {file_path: status}
+                - error: str (only if success=False)
 
         Raises:
-            SyncError: If sync fails
+            SyncError: If sync fails critically
         """
         with self.sync_lock:
             if self.is_syncing:
@@ -195,15 +200,20 @@ class SyncManager:
 
         try:
             results = {}
+            pushed_count = 0
+            pulled_count = 0
 
             # Get local and remote files
             local_files = self._get_local_files()
             remote_files = self._get_remote_files()
 
+            logger.info(f"Sync: Found {len(local_files)} local files, {len(remote_files)} remote files")
+
             # Detect conflicts
             conflicts = self.resolver.detect_conflicts(local_files, remote_files)
 
             if conflicts:
+                logger.info(f"Sync: Detected {len(conflicts)} conflicts")
                 # Try to auto-resolve
                 resolved, unresolved = self.resolver.auto_resolve(conflicts)
 
@@ -219,8 +229,6 @@ class SyncManager:
                                 conflict.path, ConflictResolution.MANUAL
                             )
                             resolved.append(conflict)
-                            # Note: We're adding to resolved list; actual resolution
-                            # happens in the next step
                     else:
                         # No conflict handler - use default strategy (most recent wins)
                         resolved.extend(unresolved)
@@ -228,7 +236,12 @@ class SyncManager:
                 # Apply resolutions
                 for conflict in resolved:
                     resolution = conflict.get_suggested_resolution()
-                    results[conflict.path] = self._apply_resolution(conflict, resolution)
+                    status = self._apply_resolution(conflict, resolution)
+                    results[conflict.path] = status
+                    if status in ("kept_local", "pushed"):
+                        pushed_count += 1
+                    elif status in ("kept_remote", "pulled"):
+                        pulled_count += 1
 
             # Sync files without conflicts
             all_paths = set(local_files.keys()) | set(remote_files.keys())
@@ -247,23 +260,53 @@ class SyncManager:
                 elif local_data and not remote_data:
                     # Local only - push to remote
                     content, _ = local_data
-                    self.github.create_or_update_file(
-                        path=path,
-                        content=content,
-                        message=f"Create {path} from local",
-                    )
-                    results[path] = "pushed"
+                    try:
+                        self.github.create_or_update_file(
+                            path=path,
+                            content=content,
+                            message=f"Create {path} from local",
+                        )
+                        results[path] = "pushed"
+                        pushed_count += 1
+                        logger.info(f"Sync: Pushed {path}")
+                    except GitHubAPIError as e:
+                        logger.error(f"Sync: Failed to push {path}: {e}")
+                        results[path] = f"error: {e}"
                 elif remote_data and not local_data:
                     # Remote only - pull to local
                     content, _ = remote_data
-                    local_file = self.local_path / path
-                    local_file.parent.mkdir(parents=True, exist_ok=True)
-                    local_file.write_text(content, encoding="utf-8")
-                    results[path] = "pulled"
+                    try:
+                        local_file = self.local_path / path
+                        local_file.parent.mkdir(parents=True, exist_ok=True)
+                        local_file.write_text(content, encoding="utf-8")
+                        results[path] = "pulled"
+                        pulled_count += 1
+                        logger.info(f"Sync: Pulled {path}")
+                    except Exception as e:
+                        logger.error(f"Sync: Failed to pull {path}: {e}")
+                        results[path] = f"error: {e}"
 
             self.last_sync = datetime.now()
             self.resolver.clear_conflicts()
-            return results
+
+            logger.info(f"Sync complete: pushed={pushed_count}, pulled={pulled_count}")
+
+            return {
+                "success": True,
+                "pushed": pushed_count,
+                "pulled": pulled_count,
+                "files": results,
+            }
+
+        except Exception as e:
+            logger.error(f"Sync failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "pushed": 0,
+                "pulled": 0,
+                "files": {},
+            }
 
         finally:
             self.is_syncing = False
@@ -280,6 +323,14 @@ class SyncManager:
         Returns:
             Status string describing the action taken
         """
+        # For MANUAL resolution without a handler, default to keeping local
+        # This is safer than throwing an error
+        if resolution == ConflictResolution.MANUAL:
+            logger.warning(
+                f"Manual resolution requested for {conflict.path}, defaulting to keep local"
+            )
+            resolution = ConflictResolution.KEEP_LOCAL
+
         content = self.resolver.resolve_conflict(conflict, resolution)
 
         if resolution == ConflictResolution.KEEP_LOCAL:

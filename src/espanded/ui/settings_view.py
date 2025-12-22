@@ -23,6 +23,7 @@ from PySide6.QtGui import QFont
 
 from espanded.ui.theme import ThemeManager
 from espanded.ui.components.hotkey_recorder import HotkeyRecorder
+from espanded.ui.github_wizard import GitHubWizard
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Settings
 
@@ -178,7 +179,7 @@ class SettingsView(QWidget):
         actions_layout.addStretch()
 
         # Save button
-        save_btn = QPushButton("\u1F4BE Save Settings")
+        save_btn = QPushButton("Save Settings")
         save_btn.clicked.connect(self._on_save)
         save_btn.setStyleSheet(f"""
             QPushButton {{
@@ -201,14 +202,21 @@ class SettingsView(QWidget):
 
     def _create_content(self) -> QWidget:
         """Create scrollable settings content."""
+        colors = self.theme_manager.colors
+
         content = QWidget()
+        content.setStyleSheet(f"background-color: {colors.bg_base};")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(20, 16, 20, 20)
         content_layout.setSpacing(16)
 
-        # Appearance section
-        appearance_section = self._create_appearance_section()
-        content_layout.addWidget(appearance_section)
+        # Hotkeys section (first - most commonly used)
+        hotkeys_section = self._create_hotkeys_section()
+        content_layout.addWidget(hotkeys_section)
+
+        # Autocomplete section (inline suggestions)
+        autocomplete_section = self._create_autocomplete_section()
+        content_layout.addWidget(autocomplete_section)
 
         # Espanso section
         espanso_section = self._create_espanso_section()
@@ -218,9 +226,9 @@ class SettingsView(QWidget):
         sync_section = self._create_sync_section()
         content_layout.addWidget(sync_section)
 
-        # Hotkeys section
-        hotkeys_section = self._create_hotkeys_section()
-        content_layout.addWidget(hotkeys_section)
+        # Appearance section (last)
+        appearance_section = self._create_appearance_section()
+        content_layout.addWidget(appearance_section)
 
         content_layout.addStretch()
 
@@ -234,36 +242,18 @@ class SettingsView(QWidget):
         card.setStyleSheet(f"""
             QFrame {{
                 background-color: {colors.bg_surface};
-                border: 1px solid {colors.border_muted};
                 border-radius: 12px;
             }}
         """)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
 
-        # Header
-        header = QWidget()
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-
-        # Icon
-        icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 20px;
-                color: {colors.primary};
-                background-color: transparent;
-            }}
-        """)
-        header_layout.addWidget(icon_label)
-
-        # Title
+        # Header (title only - icons removed for cross-platform compatibility)
         title_label = QLabel(title)
         title_font = QFont()
-        title_font.setPointSize(12)
+        title_font.setPointSize(13)
         title_font.setBold(True)
         title_label.setFont(title_font)
         title_label.setStyleSheet(f"""
@@ -272,10 +262,7 @@ class SettingsView(QWidget):
                 background-color: transparent;
             }}
         """)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-
-        layout.addWidget(header)
+        layout.addWidget(title_label)
 
         # Content
         layout.addWidget(content_widget)
@@ -287,6 +274,7 @@ class SettingsView(QWidget):
         colors = self.theme_manager.colors
 
         content = QWidget()
+        content.setStyleSheet("background-color: transparent;")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
@@ -307,15 +295,41 @@ class SettingsView(QWidget):
 
         # Radio buttons for theme
         theme_row = QWidget()
+        theme_row.setStyleSheet("background-color: transparent;")
         theme_layout = QHBoxLayout(theme_row)
         theme_layout.setContentsMargins(0, 0, 0, 0)
         theme_layout.setSpacing(16)
 
         self.theme_group = QButtonGroup()
 
+        radio_style = f"""
+            QRadioButton {{
+                color: {colors.text_primary};
+                spacing: 8px;
+                background-color: transparent;
+            }}
+            QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {colors.border_default};
+                border-radius: 9px;
+                background-color: {colors.bg_elevated};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {colors.primary};
+                border-color: {colors.primary};
+            }}
+            QRadioButton::indicator:hover {{
+                border-color: {colors.primary};
+            }}
+        """
+
         self.light_radio = QRadioButton("Light")
+        self.light_radio.setStyleSheet(radio_style)
         self.dark_radio = QRadioButton("Dark")
+        self.dark_radio.setStyleSheet(radio_style)
         self.system_radio = QRadioButton("System")
+        self.system_radio.setStyleSheet(radio_style)
 
         self.theme_group.addButton(self.light_radio, 0)
         self.theme_group.addButton(self.dark_radio, 1)
@@ -353,6 +367,28 @@ class SettingsView(QWidget):
         self.default_prefix_dropdown.addItem("// (double slash)", "//")
         self.default_prefix_dropdown.addItem(":: (double colon)", "::")
         self.default_prefix_dropdown.addItem("(none)", "")
+        self.default_prefix_dropdown.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 12px;
+            }}
+            QComboBox:focus {{
+                border-color: {colors.primary};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                selection-background-color: {colors.entry_selected};
+            }}
+        """)
 
         # Set current value
         for i in range(self.default_prefix_dropdown.count()):
@@ -373,13 +409,14 @@ class SettingsView(QWidget):
         """)
         content_layout.addWidget(help_text)
 
-        return self._create_section_card("Appearance", "\u1F3A8", content)
+        return self._create_section_card("Appearance", "", content)
 
     def _create_espanso_section(self) -> QFrame:
         """Create Espanso configuration section."""
         colors = self.theme_manager.colors
 
         content = QWidget()
+        content.setStyleSheet("background-color: transparent;")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
@@ -399,6 +436,7 @@ class SettingsView(QWidget):
         content_layout.addWidget(path_label)
 
         path_row = QWidget()
+        path_row.setStyleSheet("background-color: transparent;")
         path_layout = QHBoxLayout(path_row)
         path_layout.setContentsMargins(0, 0, 0, 0)
         path_layout.setSpacing(12)
@@ -406,9 +444,21 @@ class SettingsView(QWidget):
         self.espanso_path_field = QLineEdit()
         self.espanso_path_field.setText(self.settings.espanso_config_path)
         self.espanso_path_field.setPlaceholderText("Path to Espanso configuration directory")
+        self.espanso_path_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 12px;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
         path_layout.addWidget(self.espanso_path_field, stretch=1)
 
-        browse_btn = QPushButton("\u1F4C2 Browse")
+        browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._on_browse_espanso_path)
         browse_btn.setStyleSheet(f"""
             QPushButton {{
@@ -439,24 +489,26 @@ class SettingsView(QWidget):
         """)
         content_layout.addWidget(help_text)
 
-        return self._create_section_card("Espanso Configuration", "\u1F4C1", content)
+        return self._create_section_card("Espanso Configuration", "", content)
 
     def _create_sync_section(self) -> QFrame:
         """Create GitHub sync section."""
         colors = self.theme_manager.colors
 
         content = QWidget()
+        content.setStyleSheet("background-color: transparent;")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
 
-        # Connection status
+        # Connection status row with Sync Now button
         is_connected = bool(self.settings.github_repo and self.settings.github_token)
         status_text = "Connected" if is_connected else "Not connected"
         status_icon = "\u2713" if is_connected else "\u2601"
         status_color = colors.success if is_connected else colors.text_tertiary
 
         status_row = QWidget()
+        status_row.setStyleSheet("background-color: transparent;")
         status_layout = QHBoxLayout(status_row)
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(8)
@@ -482,6 +534,51 @@ class SettingsView(QWidget):
         status_layout.addWidget(status_label)
         status_layout.addStretch()
 
+        # Connect to GitHub button
+        self.connect_github_btn = QPushButton("Connect to GitHub" if not is_connected else "Settings")
+        self.connect_github_btn.clicked.connect(self._on_connect_github)
+        self.connect_github_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_surface};
+                border-color: {colors.primary};
+            }}
+        """)
+        self.connect_github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        status_layout.addWidget(self.connect_github_btn)
+
+        # Sync Now button
+        self.sync_now_btn = QPushButton("Sync Now")
+        self.sync_now_btn.clicked.connect(self._on_sync_now)
+        self.sync_now_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+            QPushButton:disabled {{
+                background-color: {colors.border_muted};
+                color: {colors.text_tertiary};
+            }}
+        """)
+        self.sync_now_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sync_now_btn.setVisible(is_connected)  # Only show when connected
+        status_layout.addWidget(self.sync_now_btn)
+
         content_layout.addWidget(status_row)
 
         # Repository field
@@ -501,15 +598,56 @@ class SettingsView(QWidget):
         self.github_repo_field = QLineEdit()
         self.github_repo_field.setText(self.settings.github_repo or "")
         self.github_repo_field.setPlaceholderText("username/repository")
+        self.github_repo_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 8px 12px;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
         content_layout.addWidget(self.github_repo_field)
 
         # Auto-sync checkbox
+        checkbox_style = f"""
+            QCheckBox {{
+                color: {colors.text_primary};
+                spacing: 8px;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {colors.border_default};
+                border-radius: 4px;
+                background-color: {colors.bg_elevated};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {colors.primary};
+                border-color: {colors.primary};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {colors.primary};
+            }}
+        """
+
         self.auto_sync_checkbox = QCheckBox("Auto-sync on changes")
         self.auto_sync_checkbox.setChecked(self.settings.auto_sync)
+        self.auto_sync_checkbox.setStyleSheet(checkbox_style)
         content_layout.addWidget(self.auto_sync_checkbox)
 
-        # Sync interval
-        interval_label = QLabel("Sync interval (minutes)")
+        # Sync interval row
+        interval_row = QWidget()
+        interval_row.setStyleSheet("background-color: transparent;")
+        interval_layout = QHBoxLayout(interval_row)
+        interval_layout.setContentsMargins(0, 0, 0, 0)
+        interval_layout.setSpacing(8)
+
+        interval_label = QLabel("Sync interval:")
         interval_label.setStyleSheet(f"""
             QLabel {{
                 font-size: 12px;
@@ -517,15 +655,41 @@ class SettingsView(QWidget):
                 background-color: transparent;
             }}
         """)
-        content_layout.addWidget(interval_label)
+        interval_layout.addWidget(interval_label)
 
         self.sync_interval_field = QLineEdit()
         self.sync_interval_field.setText(str(self.settings.sync_interval // 60))
-        self.sync_interval_field.setMaximumWidth(100)
-        content_layout.addWidget(self.sync_interval_field)
+        self.sync_interval_field.setFixedWidth(60)
+        self.sync_interval_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 6px 10px;
+                text-align: center;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
+        interval_layout.addWidget(self.sync_interval_field)
+
+        minutes_label = QLabel("minutes")
+        minutes_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        interval_layout.addWidget(minutes_label)
+        interval_layout.addStretch()
+
+        content_layout.addWidget(interval_row)
 
         # Note
-        note = QLabel("Note: OAuth integration is not yet implemented")
+        note = QLabel("Note: Configure GitHub token in your Espanso settings for sync to work")
         note.setStyleSheet(f"""
             QLabel {{
                 font-size: 11px;
@@ -543,6 +707,7 @@ class SettingsView(QWidget):
         colors = self.theme_manager.colors
 
         content = QWidget()
+        content.setStyleSheet("background-color: transparent;")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
@@ -551,10 +716,9 @@ class SettingsView(QWidget):
         info_box = QFrame()
         info_box.setStyleSheet(f"""
             QFrame {{
-                background-color: {colors.bg_elevated};
+                background-color: {colors.bg_base};
                 border: 1px solid {colors.border_muted};
-                border-radius: 6px;
-                padding: 12px;
+                border-radius: 8px;
             }}
         """)
         info_layout = QHBoxLayout(info_box)
@@ -584,8 +748,31 @@ class SettingsView(QWidget):
         content_layout.addWidget(info_box)
 
         # Enable hotkeys
+        checkbox_style = f"""
+            QCheckBox {{
+                color: {colors.text_primary};
+                spacing: 8px;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {colors.border_default};
+                border-radius: 4px;
+                background-color: {colors.bg_elevated};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {colors.primary};
+                border-color: {colors.primary};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {colors.primary};
+            }}
+        """
+
         self.hotkeys_enabled_switch = QCheckBox("Enable global hotkeys")
         self.hotkeys_enabled_switch.setChecked(self.settings.hotkeys_enabled)
+        self.hotkeys_enabled_switch.setStyleSheet(checkbox_style)
         content_layout.addWidget(self.hotkeys_enabled_switch)
 
         # Quick add hotkey recorder
@@ -600,9 +787,174 @@ class SettingsView(QWidget):
         # Minimize to tray
         self.minimize_to_tray_checkbox = QCheckBox("Minimize to system tray")
         self.minimize_to_tray_checkbox.setChecked(self.settings.minimize_to_tray)
+        self.minimize_to_tray_checkbox.setStyleSheet(checkbox_style)
         content_layout.addWidget(self.minimize_to_tray_checkbox)
 
         return self._create_section_card("Hotkeys & Behavior", "\u2328", content)
+
+    def _create_autocomplete_section(self) -> QFrame:
+        """Create autocomplete settings section."""
+        colors = self.theme_manager.colors
+
+        content = QWidget()
+        content.setStyleSheet("background-color: transparent;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
+        # Info box
+        info_box = QFrame()
+        info_box.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_base};
+                border: 1px solid {colors.border_muted};
+                border-radius: 8px;
+            }}
+        """)
+        info_layout = QHBoxLayout(info_box)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+
+        info_icon = QLabel("\u2139")
+        info_icon.setStyleSheet(f"""
+            QLabel {{
+                font-size: 14px;
+                color: {colors.primary};
+                background-color: transparent;
+            }}
+        """)
+        info_layout.addWidget(info_icon)
+
+        info_text = QLabel("When enabled, typing a trigger character (like :) will show matching entries inline as you type.")
+        info_text.setWordWrap(True)
+        info_text.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        info_layout.addWidget(info_text, stretch=1)
+
+        content_layout.addWidget(info_box)
+
+        # Enable autocomplete
+        checkbox_style = f"""
+            QCheckBox {{
+                color: {colors.text_primary};
+                spacing: 8px;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {colors.border_default};
+                border-radius: 4px;
+                background-color: {colors.bg_elevated};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {colors.primary};
+                border-color: {colors.primary};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {colors.primary};
+            }}
+        """
+
+        self.autocomplete_enabled_checkbox = QCheckBox("Enable inline autocomplete")
+        self.autocomplete_enabled_checkbox.setChecked(self.settings.autocomplete_enabled)
+        self.autocomplete_enabled_checkbox.setStyleSheet(checkbox_style)
+        content_layout.addWidget(self.autocomplete_enabled_checkbox)
+
+        # Trigger characters
+        trigger_label = QLabel("Trigger Characters")
+        trigger_label_font = QFont()
+        trigger_label_font.setPointSize(10)
+        trigger_label_font.setBold(True)
+        trigger_label.setFont(trigger_label_font)
+        trigger_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(trigger_label)
+
+        # Trigger selection (checkboxes for common triggers)
+        triggers_row = QWidget()
+        triggers_row.setStyleSheet("background: transparent;")
+        triggers_layout = QHBoxLayout(triggers_row)
+        triggers_layout.setContentsMargins(0, 0, 0, 0)
+        triggers_layout.setSpacing(16)
+
+        current_triggers = self.settings.autocomplete_triggers
+
+        self.trigger_colon = QCheckBox(": (colon)")
+        self.trigger_colon.setChecked(":" in current_triggers)
+        self.trigger_colon.setStyleSheet(checkbox_style)
+        triggers_layout.addWidget(self.trigger_colon)
+
+        self.trigger_semicolon = QCheckBox("; (semicolon)")
+        self.trigger_semicolon.setChecked(";" in current_triggers)
+        self.trigger_semicolon.setStyleSheet(checkbox_style)
+        triggers_layout.addWidget(self.trigger_semicolon)
+
+        self.trigger_slash = QCheckBox("// (double slash)")
+        self.trigger_slash.setChecked("//" in current_triggers)
+        self.trigger_slash.setStyleSheet(checkbox_style)
+        triggers_layout.addWidget(self.trigger_slash)
+
+        triggers_layout.addStretch()
+        content_layout.addWidget(triggers_row)
+
+        trigger_help = QLabel("Select which prefix characters trigger the autocomplete popup")
+        trigger_help.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(trigger_help)
+
+        # Max suggestions
+        max_row = QWidget()
+        max_row.setStyleSheet("background: transparent;")
+        max_layout = QHBoxLayout(max_row)
+        max_layout.setContentsMargins(0, 0, 0, 0)
+        max_layout.setSpacing(8)
+
+        max_label = QLabel("Max suggestions:")
+        max_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                color: {colors.text_secondary};
+                background-color: transparent;
+            }}
+        """)
+        max_layout.addWidget(max_label)
+
+        self.autocomplete_max_field = QLineEdit()
+        self.autocomplete_max_field.setText(str(self.settings.autocomplete_max_suggestions))
+        self.autocomplete_max_field.setFixedWidth(50)
+        self.autocomplete_max_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 6px;
+                padding: 6px 10px;
+                text-align: center;
+            }}
+            QLineEdit:focus {{
+                border-color: {colors.primary};
+            }}
+        """)
+        max_layout.addWidget(self.autocomplete_max_field)
+        max_layout.addStretch()
+
+        content_layout.addWidget(max_row)
+
+        return self._create_section_card("Inline Autocomplete", "", content)
 
     def _on_browse_espanso_path(self):
         """Handle browse button for Espanso path."""
@@ -666,6 +1018,153 @@ class SettingsView(QWidget):
         self.quick_add_hotkey_recorder.set_value(self.settings.quick_add_hotkey)
         self.minimize_to_tray_checkbox.setChecked(self.settings.minimize_to_tray)
 
+        # Autocomplete
+        self.autocomplete_enabled_checkbox.setChecked(self.settings.autocomplete_enabled)
+        triggers = self.settings.autocomplete_triggers
+        self.trigger_colon.setChecked(":" in triggers)
+        self.trigger_semicolon.setChecked(";" in triggers)
+        self.trigger_slash.setChecked("//" in triggers)
+        self.autocomplete_max_field.setText(str(self.settings.autocomplete_max_suggestions))
+
+    def _on_sync_now(self):
+        """Handle Sync Now button click."""
+        # Check if sync is configured
+        if not self.app_state.sync_manager:
+            # Try to initialize if settings are available
+            settings = self.app_state.settings
+            if settings.github_repo and settings.github_token:
+                self._initialize_sync_manager()
+                if not self.app_state.sync_manager:
+                    return  # Initialization failed, message already shown
+            else:
+                QMessageBox.information(
+                    self,
+                    "Sync Not Configured",
+                    "GitHub sync is not configured. Click 'Connect to GitHub' to set it up.",
+                )
+                return
+
+        # Disable button during sync
+        self.sync_now_btn.setEnabled(False)
+        self.sync_now_btn.setText("Syncing...")
+
+        try:
+            # Perform sync
+            result = self.app_state.sync_manager.sync()
+
+            if result.get("success"):
+                QMessageBox.information(
+                    self,
+                    "Sync Complete",
+                    f"Sync completed successfully.\n\nPulled: {result.get('pulled', 0)} changes\nPushed: {result.get('pushed', 0)} changes",
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Sync Failed",
+                    f"Sync failed: {result.get('error', 'Unknown error')}",
+                )
+        except Exception as ex:
+            QMessageBox.critical(
+                self,
+                "Sync Error",
+                f"Error during sync: {str(ex)}",
+            )
+        finally:
+            # Re-enable button
+            self.sync_now_btn.setEnabled(True)
+            self.sync_now_btn.setText("Sync Now")
+
+    def _on_connect_github(self):
+        """Open GitHub connection wizard."""
+        self._github_wizard = GitHubWizard(self.theme_manager, self)
+        self._github_wizard.connection_saved.connect(self._on_github_connection_saved)
+        self._github_wizard.show_centered()
+
+    def _on_github_connection_saved(self):
+        """Handle GitHub connection saved."""
+        # Reload settings
+        self.settings = self.app_state.settings
+
+        # Update the repository field
+        self.github_repo_field.setText(self.settings.github_repo or "")
+
+        # Update the auto-sync checkbox
+        self.auto_sync_checkbox.setChecked(self.settings.auto_sync)
+
+        # Update UI state to show Sync Now button
+        self.sync_now_btn.setVisible(True)
+        self.connect_github_btn.setText("Settings")
+
+        # Initialize sync manager
+        self._initialize_sync_manager(show_success_message=True)
+
+    def _initialize_sync_manager(self, show_success_message: bool = False):
+        """Initialize or reinitialize the sync manager with current settings.
+
+        Args:
+            show_success_message: If True, show a message box on successful connection.
+        """
+        from pathlib import Path
+
+        try:
+            from espanded.sync import SyncManager
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "Sync Not Available",
+                "Sync functionality is not available. Please install httpx.",
+            )
+            return
+
+        settings = self.app_state.settings
+
+        if not settings.github_repo or not settings.github_token:
+            return
+
+        try:
+            # Determine espanso config path
+            if settings.espanso_config_path:
+                local_path = Path(settings.espanso_config_path)
+            else:
+                # Default espanso config path
+                import platform
+                if platform.system() == "Windows":
+                    local_path = Path.home() / "AppData" / "Roaming" / "espanso"
+                else:
+                    local_path = Path.home() / ".config" / "espanso"
+
+            # Create sync manager
+            sync_manager = SyncManager(
+                repo=settings.github_repo,
+                token=settings.github_token,
+                local_path=local_path,
+                on_conflict=None,
+            )
+
+            # Test connection
+            if sync_manager.test_connection():
+                self.app_state.sync_manager = sync_manager
+                if show_success_message:
+                    QMessageBox.information(
+                        self,
+                        "Connected",
+                        f"Successfully connected to GitHub!\n\nRepository: {settings.github_repo}\n\nYou can now use Sync Now.",
+                    )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Connection Failed",
+                    "Could not connect to GitHub. Please check your token and repository.",
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to initialize sync: {str(e)}",
+            )
+
     def _on_save(self):
         """Save settings."""
         try:
@@ -700,6 +1199,29 @@ class SettingsView(QWidget):
             self.settings.hotkeys_enabled = self.hotkeys_enabled_switch.isChecked()
             self.settings.minimize_to_tray = self.minimize_to_tray_checkbox.isChecked()
 
+            # Autocomplete settings
+            self.settings.autocomplete_enabled = self.autocomplete_enabled_checkbox.isChecked()
+
+            # Build trigger list from checkboxes
+            triggers = []
+            if self.trigger_colon.isChecked():
+                triggers.append(":")
+            if self.trigger_semicolon.isChecked():
+                triggers.append(";")
+            if self.trigger_slash.isChecked():
+                triggers.append("//")
+            # Default to colon if nothing selected
+            if not triggers:
+                triggers = [":"]
+            self.settings.autocomplete_triggers = triggers
+
+            # Parse max suggestions
+            try:
+                max_suggestions = int(self.autocomplete_max_field.text())
+                self.settings.autocomplete_max_suggestions = max(1, min(max_suggestions, 20))
+            except ValueError:
+                self.settings.autocomplete_max_suggestions = 8
+
             # Update hotkey service if settings changed
             from espanded.services.hotkey_service import get_hotkey_service
 
@@ -710,6 +1232,13 @@ class SettingsView(QWidget):
                     hotkey_service.enable()
                 else:
                     hotkey_service.disable()
+
+            # Update autocomplete service if settings changed
+            from espanded.services.autocomplete_service import get_autocomplete_service
+
+            autocomplete_service = get_autocomplete_service()
+            if autocomplete_service:
+                autocomplete_service.update_settings()
 
             # Save to database
             self.app_state.settings = self.settings
