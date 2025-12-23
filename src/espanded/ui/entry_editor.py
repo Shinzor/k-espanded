@@ -14,13 +14,17 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QScrollArea,
-    QMessageBox,
     QMenu,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.components.message_dialog import (
+    show_warning,
+    show_question,
+)
+from espanded.ui.tag_colors import get_tag_color_manager
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
 
@@ -758,13 +762,14 @@ class EntryEditor(QWidget):
 
     def _add_tag_chip(self, tag: str):
         """Add a tag chip to the container."""
-        colors = self.theme_manager.colors
+        tag_color_manager = get_tag_color_manager()
+        tag_colors_dict = tag_color_manager.get_color(tag)
 
         chip = QWidget()
         chip.setProperty("tag", tag)
         chip.setStyleSheet(f"""
             QWidget {{
-                background-color: {colors.tag_bg};
+                background-color: {tag_colors_dict['bg']};
                 border-radius: 12px;
             }}
         """)
@@ -776,7 +781,8 @@ class EntryEditor(QWidget):
         tag_label.setStyleSheet(f"""
             QLabel {{
                 font-size: 12px;
-                color: {colors.tag_text};
+                font-weight: 500;
+                color: {tag_colors_dict['text']};
                 background-color: transparent;
             }}
         """)
@@ -788,14 +794,15 @@ class EntryEditor(QWidget):
         remove_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: {colors.tag_text};
+                color: {tag_colors_dict['text']};
                 border: none;
                 font-size: 10px;
                 font-weight: 600;
                 padding: 0px;
             }}
             QPushButton:hover {{
-                color: {colors.text_primary};
+                color: {tag_colors_dict['text']};
+                opacity: 0.7;
             }}
         """)
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -923,7 +930,12 @@ class EntryEditor(QWidget):
         """Handle save button click."""
         entry = self._build_entry_from_form()
         if not entry:
-            QMessageBox.warning(self, "Validation Error", "Trigger is required")
+            show_warning(
+                self.theme_manager,
+                "Validation Error",
+                "Trigger is required.",
+                parent=self,
+            )
             return
 
         self.entry_saved.emit(entry)
@@ -931,14 +943,15 @@ class EntryEditor(QWidget):
     def _on_delete_click(self):
         """Handle delete button click."""
         if self.current_entry:
-            reply = QMessageBox.question(
-                self,
+            reply = show_question(
+                self.theme_manager,
                 "Confirm Delete",
                 f"Are you sure you want to delete '{self.current_entry.full_trigger}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                buttons=["Yes", "No"],
+                default_button="No",
+                parent=self,
             )
-            if reply == QMessageBox.StandardButton.Yes:
+            if reply == "Yes":
                 self.entry_deleted.emit(self.current_entry)
 
     def _on_clone_click(self):

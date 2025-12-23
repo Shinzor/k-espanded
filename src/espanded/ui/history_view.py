@@ -12,12 +12,15 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QScrollArea,
-    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.components.message_dialog import (
+    show_information,
+    show_warning,
+)
 from espanded.core.app_state import get_app_state
 from espanded.core.models import HistoryEntry
 
@@ -467,9 +470,19 @@ class HistoryView(QWidget):
         if success:
             self.entry_restored.emit(entry_id)
             self._refresh_history()
-            QMessageBox.information(self, "Entry Restored", "Entry has been restored successfully")
+            show_information(
+                self.theme_manager,
+                "Entry Restored",
+                "Entry has been restored successfully.",
+                parent=self,
+            )
         else:
-            QMessageBox.warning(self, "Restore Failed", "Failed to restore entry")
+            show_warning(
+                self.theme_manager,
+                "Restore Failed",
+                "Failed to restore entry.",
+                parent=self,
+            )
 
     def refresh(self):
         """Refresh the history view."""

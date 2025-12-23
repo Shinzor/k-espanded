@@ -16,6 +16,8 @@ from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QKeyEvent, QCursor, QMouseEvent
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.icon import create_app_icon
+from espanded.ui.tag_colors import get_tag_color_manager
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
 
@@ -56,6 +58,9 @@ class QuickAddPopup(QDialog):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+
+        # Set window icon
+        self.setWindowIcon(create_app_icon())
 
         # Fixed size (increased for tags)
         self.setFixedSize(420, 400)
@@ -386,13 +391,14 @@ class QuickAddPopup(QDialog):
 
     def _add_tag_chip(self, tag: str):
         """Add a tag chip to the container."""
-        colors = self.theme_manager.colors
+        tag_color_manager = get_tag_color_manager()
+        tag_colors_dict = tag_color_manager.get_color(tag)
 
         chip = QWidget()
         chip.setProperty("tag", tag)
         chip.setStyleSheet(f"""
             QWidget {{
-                background-color: {colors.tag_bg};
+                background-color: {tag_colors_dict['bg']};
                 border-radius: 10px;
             }}
         """)
@@ -404,7 +410,8 @@ class QuickAddPopup(QDialog):
         tag_label.setStyleSheet(f"""
             QLabel {{
                 font-size: 11px;
-                color: {colors.tag_text};
+                font-weight: 500;
+                color: {tag_colors_dict['text']};
                 background: transparent;
             }}
         """)
@@ -416,14 +423,15 @@ class QuickAddPopup(QDialog):
         remove_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
-                color: {colors.tag_text};
+                color: {tag_colors_dict['text']};
                 border: none;
                 font-size: 10px;
                 font-weight: bold;
                 padding: 0px;
             }}
             QPushButton:hover {{
-                color: {colors.text_primary};
+                color: {tag_colors_dict['text']};
+                opacity: 0.7;
             }}
         """)
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)

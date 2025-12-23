@@ -321,9 +321,7 @@ class AutocompleteService(QObject):
         """
         try:
             # Get all active entries
-            all_entries = self.app_state.entry_manager.list_entries(
-                include_deleted=False
-            )
+            all_entries = self.app_state.entry_manager.get_all_entries()
 
             # Filter by trigger prefix and filter text
             search_text = match.filter_text.lower()

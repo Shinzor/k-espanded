@@ -10,13 +10,13 @@ from PySide6.QtWidgets import (
     QFrame,
     QWidget,
     QCheckBox,
-    QMessageBox,
     QScrollArea,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QUrl, QPoint
 from PySide6.QtGui import QDesktopServices, QMouseEvent, QCursor
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.components.message_dialog import show_information
 from espanded.core.app_state import get_app_state
 
 # Check for sync dependencies
@@ -643,10 +643,11 @@ class GitHubWizard(QDialog):
 
         self.connection_saved.emit()
 
-        QMessageBox.information(
-            self,
+        show_information(
+            self.theme_manager,
             "Connected",
-            f"Successfully connected to GitHub!\n\nRepository: {repo}\n\nYour entries will now sync automatically."
+            f"Successfully connected to GitHub!\n\nRepository: {repo}\n\nYour entries will now sync automatically.",
+            parent=self,
         )
 
         self.accept()

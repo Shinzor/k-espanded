@@ -186,9 +186,13 @@ class HotkeyListener:
         if self._listener:
             try:
                 self._listener.stop()
-            except Exception:
-                pass
-            self._listener = None
+                # Wait for the listener thread to finish
+                if hasattr(self._listener, 'join'):
+                    self._listener.join(timeout=1.0)
+            except Exception as e:
+                print(f"Error stopping listener: {e}")
+            finally:
+                self._listener = None
 
     def _restart(self):
         """Restart the listener with updated hotkeys."""

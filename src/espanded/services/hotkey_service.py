@@ -115,11 +115,17 @@ class HotkeyService:
         Args:
             new_hotkey: New hotkey string (e.g., '<ctrl>+<alt>+e')
         """
+        import time
+
         was_running = self._running
         was_enabled = self._enabled
 
-        # Stop current listener
+        # Stop current listener and ensure it's fully stopped
         self.stop()
+
+        # Give the listener thread time to cleanly shut down
+        if was_running:
+            time.sleep(0.2)
 
         # Start with new hotkey
         if was_running:

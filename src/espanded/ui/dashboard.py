@@ -183,7 +183,7 @@ class Dashboard(QWidget):
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
 
         # Title
         title = QLabel("GitHub Sync")
@@ -198,6 +198,7 @@ class Dashboard(QWidget):
         # Get sync status
         settings = self.app_state.settings
         is_connected = bool(settings.github_repo and settings.github_token)
+        sync_manager = self.app_state.sync_manager
 
         # Status indicator
         status_row = QWidget()
@@ -218,30 +219,70 @@ class Dashboard(QWidget):
 
         layout.addWidget(status_row)
 
-        # Repository info
-        repo_name = settings.github_repo or "No repository set"
-        repo_label = QLabel(repo_name)
-        repo_label.setStyleSheet(f"""
-            font-size: 12px;
-            color: {colors.text_secondary};
-            background: transparent;
-        """)
-        layout.addWidget(repo_label)
+        if is_connected:
+            # Repository info
+            repo_name = settings.github_repo
+            repo_label = QLabel(f"📁 {repo_name}")
+            repo_label.setStyleSheet(f"""
+                font-size: 13px;
+                color: {colors.text_primary};
+                background: transparent;
+                padding: 4px 0px;
+            """)
+            layout.addWidget(repo_label)
 
-        # Last sync
-        last_sync = "Never"
-        if settings.last_sync:
-            try:
-                last_sync = settings.last_sync.strftime("%b %d, %I:%M %p")
-            except Exception:
-                pass
-        sync_label = QLabel(f"Last sync: {last_sync}")
-        sync_label.setStyleSheet(f"""
-            font-size: 12px;
-            color: {colors.text_tertiary};
-            background: transparent;
-        """)
-        layout.addWidget(sync_label)
+            # Auto-sync status
+            auto_sync_text = "Auto-sync: " + ("ON" if settings.auto_sync else "OFF")
+            if settings.auto_sync:
+                interval_mins = settings.sync_interval // 60
+                auto_sync_text += f" (every {interval_mins} min)"
+            auto_sync_label = QLabel(auto_sync_text)
+            auto_sync_label.setStyleSheet(f"""
+                font-size: 12px;
+                color: {colors.text_secondary};
+                background: transparent;
+            """)
+            layout.addWidget(auto_sync_label)
+
+            # Last sync
+            last_sync = "Never"
+            if sync_manager and hasattr(sync_manager, 'last_sync') and sync_manager.last_sync:
+                try:
+                    from datetime import datetime, timezone
+                    now = datetime.now(tz=timezone.utc)
+                    diff = now - sync_manager.last_sync
+
+                    if diff.total_seconds() < 60:
+                        last_sync = "Just now"
+                    elif diff.total_seconds() < 3600:
+                        mins = int(diff.total_seconds() / 60)
+                        last_sync = f"{mins} min ago"
+                    elif diff.total_seconds() < 86400:
+                        hours = int(diff.total_seconds() / 3600)
+                        last_sync = f"{hours} hr ago"
+                    else:
+                        last_sync = sync_manager.last_sync.strftime("%b %d, %I:%M %p")
+                except Exception:
+                    pass
+
+            sync_label = QLabel(f"Last sync: {last_sync}")
+            sync_label.setStyleSheet(f"""
+                font-size: 12px;
+                color: {colors.text_tertiary};
+                background: transparent;
+            """)
+            layout.addWidget(sync_label)
+        else:
+            # Not configured message
+            info_label = QLabel("Sync your entries across devices\nvia GitHub repository")
+            info_label.setWordWrap(True)
+            info_label.setStyleSheet(f"""
+                font-size: 12px;
+                color: {colors.text_secondary};
+                background: transparent;
+                line-height: 1.4;
+            """)
+            layout.addWidget(info_label)
 
         # Action button
         layout.addStretch()
@@ -252,6 +293,25 @@ class Dashboard(QWidget):
         else:
             self.sync_button.setText("Configure Sync")
             self.sync_button.clicked.connect(self.settings_clicked.emit)
+
+        # Style the button properly
+        self.sync_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 10px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {colors.primary_muted};
+            }}
+        """)
         self.sync_button.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(self.sync_button)
 

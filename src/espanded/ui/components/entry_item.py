@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QMouseEvent, QCursor
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.tag_colors import get_tag_color_manager
 from espanded.core.models import Entry
 
 
@@ -95,18 +96,24 @@ class EntryItem(QWidget):
         # Tag chips (show first 3)
         if self.entry.tags:
             tags_row = QHBoxLayout()
-            tags_row.setSpacing(4)
+            tags_row.setSpacing(6)
+
+            tag_color_manager = get_tag_color_manager()
 
             for i, tag in enumerate(self.entry.tags[:3]):
+                # Get color for this tag
+                tag_colors_dict = tag_color_manager.get_color(tag)
+
                 tag_chip = QLabel(tag)
                 tag_chip.setStyleSheet(
                     f"""
                     QLabel {{
-                        font-size: 10px;
-                        color: {colors.tag_text};
-                        background-color: {colors.tag_bg};
-                        border-radius: 10px;
-                        padding: 2px 6px;
+                        font-size: 11px;
+                        font-weight: 500;
+                        color: {tag_colors_dict['text']};
+                        background-color: {tag_colors_dict['bg']};
+                        border-radius: 12px;
+                        padding: 4px 10px;
                     }}
                 """
                 )

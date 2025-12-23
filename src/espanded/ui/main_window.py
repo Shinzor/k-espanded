@@ -16,6 +16,11 @@ from espanded.ui.theme import ThemeManager
 from espanded.ui.sidebar import Sidebar
 from espanded.ui.components.title_bar import TitleBar
 from espanded.ui.components.status_bar import StatusBar
+from espanded.ui.components.message_dialog import (
+    show_information,
+    show_critical,
+)
+from espanded.ui.icon import create_app_icon
 from espanded.ui.dashboard import Dashboard
 from espanded.ui.entry_editor import EntryEditor
 from espanded.ui.settings_view import SettingsView
@@ -57,6 +62,9 @@ class MainWindow(QMainWindow):
         # Frameless window
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
+        # Set window icon
+        self.setWindowIcon(create_app_icon())
 
         # Window size
         self.setMinimumSize(900, 600)
@@ -246,8 +254,12 @@ class MainWindow(QMainWindow):
             self.show_dashboard()
 
         except Exception as ex:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Save Error", f"Failed to save entry: {str(ex)}")
+            show_critical(
+                self.theme_manager,
+                "Save Error",
+                f"Failed to save entry: {str(ex)}",
+                parent=self,
+            )
 
     def _on_entry_deleted(self, entry: Entry):
         """Handle entry delete from editor."""
@@ -282,9 +294,50 @@ class MainWindow(QMainWindow):
 
     def _on_sync_now(self):
         """Handle sync now button from dashboard."""
-        # TODO: Implement sync
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.information(self, "Sync", "Sync functionality will be implemented in a future phase")
+        # Check if sync is configured
+        if not self.app_state.sync_manager:
+            show_information(
+                self.theme_manager,
+                "Sync Not Configured",
+                "GitHub sync is not configured. Go to Settings to set it up.",
+                parent=self,
+            )
+            return
+
+        try:
+            # Perform sync
+            result = self.app_state.sync_manager.sync()
+
+            if result.get("success"):
+                # Import any pulled files
+                if result.get('pulled', 0) > 0:
+                    imported_count = self.app_state.entry_manager.import_from_espanso()
+
+                    # Refresh all UI components
+                    self.sidebar.refresh_entries()
+                    self.status_bar.update_entry_count()
+                    self.dashboard.refresh_stats()
+
+                show_information(
+                    self.theme_manager,
+                    "Sync Complete",
+                    f"Sync completed successfully.\n\nPulled: {result.get('pulled', 0)} changes\nPushed: {result.get('pushed', 0)} changes",
+                    parent=self,
+                )
+            else:
+                show_critical(
+                    self.theme_manager,
+                    "Sync Failed",
+                    f"Sync failed: {result.get('error', 'Unknown error')}",
+                    parent=self,
+                )
+        except Exception as ex:
+            show_critical(
+                self.theme_manager,
+                "Sync Error",
+                f"Error during sync: {str(ex)}",
+                parent=self,
+            )
 
     def _on_theme_changed(self):
         """Handle theme change from settings."""
@@ -293,11 +346,11 @@ class MainWindow(QMainWindow):
         self.theme_manager.apply_to_app(QApplication.instance())
 
         # Refresh all views (theme colors updated)
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.information(
-            self,
+        show_information(
+            self.theme_manager,
             "Theme Changed",
             "Theme has been changed. Please restart the application for full effect.",
+            parent=self,
         )
 
     def _on_settings_saved(self):
@@ -335,7 +388,7 @@ class MainWindow(QMainWindow):
         self.tray.show_requested.connect(self._on_tray_show)
         self.tray.quick_add_requested.connect(self.show_quick_add)
         self.tray.hotkeys_toggled.connect(self._on_tray_hotkeys_toggled)
-        self.tray.quit_requested.connect(self.close)
+        self.tray.quit_requested.connect(self.quit_application)
 
         # Show the tray icon
         self.tray.show()
@@ -413,6 +466,11 @@ class MainWindow(QMainWindow):
                 f"Created trigger: {entry.trigger}",
                 2000,
             )
+
+    def quit_application(self):
+        """Quit the application completely (used by tray quit action)."""
+        # Close the window (this will trigger cleanup)
+        QApplication.instance().quit()
 
     def closeEvent(self, event):
         """Handle window close event."""

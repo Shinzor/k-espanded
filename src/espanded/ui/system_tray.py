@@ -8,6 +8,7 @@ from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 from PySide6.QtCore import Qt, QObject, Signal
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.icon import create_app_icon
 
 
 def create_default_icon(size: int = 64) -> QPixmap:
@@ -90,9 +91,8 @@ class SystemTray(QObject):
         if self._icon_path and Path(self._icon_path).exists():
             icon = QIcon(str(self._icon_path))
         else:
-            # Use default icon
-            pixmap = create_default_icon()
-            icon = QIcon(pixmap)
+            # Use app icon
+            icon = create_app_icon()
 
         self.tray_icon.setIcon(icon)
 

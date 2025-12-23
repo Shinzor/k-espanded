@@ -11,12 +11,16 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QFrame,
     QScrollArea,
-    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 from espanded.ui.theme import ThemeManager
+from espanded.ui.components.message_dialog import (
+    show_information,
+    show_warning,
+    show_question,
+)
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Entry
 
@@ -416,7 +420,12 @@ class TrashView(QWidget):
         """Restore a deleted entry."""
         entry = self.app_state.entry_manager.get_entry(entry_id)
         if not entry:
-            QMessageBox.warning(self, "Entry Not Found", "Entry not found")
+            show_warning(
+                self.theme_manager,
+                "Entry Not Found",
+                "Entry not found.",
+                parent=self,
+            )
             return
 
         success = self.app_state.entry_manager.restore_entry(entry_id)
@@ -424,21 +433,32 @@ class TrashView(QWidget):
         if success:
             self.entry_restored.emit(entry_id)
             self._refresh_trash()
-            QMessageBox.information(self, "Entry Restored", f"Restored {entry.full_trigger}")
+            show_information(
+                self.theme_manager,
+                "Entry Restored",
+                f"Restored {entry.full_trigger}",
+                parent=self,
+            )
         else:
-            QMessageBox.warning(self, "Restore Failed", "Failed to restore entry")
+            show_warning(
+                self.theme_manager,
+                "Restore Failed",
+                "Failed to restore entry.",
+                parent=self,
+            )
 
     def _confirm_permanent_delete(self, entry_id: str, trigger: str):
         """Show confirmation dialog before permanent deletion."""
-        reply = QMessageBox.question(
-            self,
+        reply = show_question(
+            self.theme_manager,
             "Confirm Permanent Deletion",
             f"Are you sure you want to permanently delete '{trigger}'?\n\nThis action cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            buttons=["Yes", "No"],
+            default_button="No",
+            parent=self,
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == "Yes":
             self._permanent_delete_entry(entry_id, trigger)
 
     def _permanent_delete_entry(self, entry_id: str, trigger: str):
@@ -447,9 +467,19 @@ class TrashView(QWidget):
 
         if success:
             self._refresh_trash()
-            QMessageBox.information(self, "Entry Deleted", f"Permanently deleted {trigger}")
+            show_information(
+                self.theme_manager,
+                "Entry Deleted",
+                f"Permanently deleted {trigger}",
+                parent=self,
+            )
         else:
-            QMessageBox.warning(self, "Delete Failed", "Failed to delete entry")
+            show_warning(
+                self.theme_manager,
+                "Delete Failed",
+                "Failed to delete entry.",
+                parent=self,
+            )
 
     def _on_empty_trash(self):
         """Show confirmation dialog before emptying trash."""
@@ -459,15 +489,16 @@ class TrashView(QWidget):
         if count == 0:
             return
 
-        reply = QMessageBox.question(
-            self,
+        reply = show_question(
+            self.theme_manager,
             "Confirm Empty Trash",
             f"Are you sure you want to permanently delete all {count} items in the trash?\n\nThis action cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            buttons=["Yes", "No"],
+            default_button="No",
+            parent=self,
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == "Yes":
             self._empty_trash()
 
     def _empty_trash(self):
@@ -480,10 +511,11 @@ class TrashView(QWidget):
                 count += 1
 
         self._refresh_trash()
-        QMessageBox.information(
-            self,
+        show_information(
+            self.theme_manager,
             "Trash Emptied",
-            f"Permanently deleted {count} item{'s' if count != 1 else ''}",
+            f"Permanently deleted {count} item{'s' if count != 1 else ''}.",
+            parent=self,
         )
 
     def refresh(self):

@@ -24,13 +24,6 @@ logging.basicConfig(
     stream=sys.stdout
 )
 
-# Optional tray support
-try:
-    from espanded.tray import SystemTray, PYSTRAY_AVAILABLE
-except ImportError:
-    PYSTRAY_AVAILABLE = False
-    SystemTray = None
-
 # Optional sync support
 try:
     from espanded.sync import SyncManager
@@ -184,9 +177,11 @@ def create_app() -> tuple[MainWindow | None, dict]:
     try:
         print("[7/8] Initializing system tray...")
         tray = None
-        # Always create tray if minimize_to_tray is enabled
-        # (Qt system tray is always available, doesn't depend on pystray)
-        if settings.minimize_to_tray:
+        # Check if system tray is available
+        from PySide6.QtWidgets import QSystemTrayIcon
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            print("⚠ System tray not available on this platform")
+        elif settings.minimize_to_tray:
             tray = SystemTray(theme_manager)
             print("✓ Qt system tray created")
         else:

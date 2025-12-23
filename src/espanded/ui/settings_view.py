@@ -16,13 +16,18 @@ from PySide6.QtWidgets import (
     QFrame,
     QScrollArea,
     QFileDialog,
-    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 from espanded.ui.theme import ThemeManager
 from espanded.ui.components.hotkey_recorder import HotkeyRecorder
+from espanded.ui.components.message_dialog import (
+    show_information,
+    show_warning,
+    show_critical,
+    show_question,
+)
 from espanded.ui.github_wizard import GitHubWizard
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Settings
@@ -579,6 +584,33 @@ class SettingsView(QWidget):
         self.sync_now_btn.setVisible(is_connected)  # Only show when connected
         status_layout.addWidget(self.sync_now_btn)
 
+        # Pull from Server button
+        self.pull_btn = QPushButton("Pull from Server")
+        self.pull_btn.clicked.connect(self._on_pull_from_server)
+        self.pull_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.primary};
+                border: 1px solid {colors.primary};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+            }}
+            QPushButton:disabled {{
+                border-color: {colors.border_muted};
+                color: {colors.text_tertiary};
+            }}
+        """)
+        self.pull_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pull_btn.setVisible(is_connected)  # Only show when connected
+        self.pull_btn.setToolTip("Download all files from server, overwriting local changes")
+        status_layout.addWidget(self.pull_btn)
+
         content_layout.addWidget(status_row)
 
         # Repository field
@@ -968,15 +1000,16 @@ class SettingsView(QWidget):
 
     def _on_reset_defaults(self):
         """Reset settings to defaults."""
-        reply = QMessageBox.question(
-            self,
+        reply = show_question(
+            self.theme_manager,
             "Reset to Defaults",
             "Are you sure you want to reset all settings to their default values?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            buttons=["Yes", "No"],
+            default_button="No",
+            parent=self,
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == "Yes":
             # Create new default settings
             self.settings = Settings()
             self.app_state.settings = self.settings
@@ -987,7 +1020,12 @@ class SettingsView(QWidget):
             # Notify theme change
             self.theme_changed.emit()
 
-            QMessageBox.information(self, "Settings Reset", "Settings have been reset to defaults")
+            show_information(
+                self.theme_manager,
+                "Settings Reset",
+                "Settings have been reset to defaults.",
+                parent=self,
+            )
 
     def _rebuild_ui(self):
         """Rebuild UI with current settings values."""
@@ -1026,6 +1064,72 @@ class SettingsView(QWidget):
         self.trigger_slash.setChecked("//" in triggers)
         self.autocomplete_max_field.setText(str(self.settings.autocomplete_max_suggestions))
 
+    def _on_pull_from_server(self):
+        """Handle Pull from Server button click."""
+        # Confirm with user
+        reply = show_question(
+            self.theme_manager,
+            "Pull from Server",
+            "This will download all configuration files from the server and overwrite any local changes.\n\nAre you sure you want to continue?",
+            buttons=["Yes", "No"],
+            default_button="No",
+            parent=self,
+        )
+
+        if reply != "Yes":
+            return
+
+        # Check if sync is configured
+        if not self.app_state.sync_manager:
+            show_information(
+                self.theme_manager,
+                "Sync Not Configured",
+                "GitHub sync is not configured. Click 'Connect to GitHub' to set it up.",
+                parent=self,
+            )
+            return
+
+        # Disable buttons during pull
+        self.sync_now_btn.setEnabled(False)
+        self.pull_btn.setEnabled(False)
+        self.pull_btn.setText("Pulling...")
+
+        try:
+            # Perform pull
+            result = self.app_state.sync_manager.pull(force=True)
+
+            file_count = len(result)
+
+            # Import the pulled files into the database (clear existing entries first)
+            imported_count = self.app_state.entry_manager.import_from_espanso(clear_existing=True)
+
+            # Refresh all UI components
+            if hasattr(self.parent(), 'sidebar'):
+                self.parent().sidebar.refresh_entries()
+            if hasattr(self.parent(), 'status_bar'):
+                self.parent().status_bar.update_entry_count()
+            if hasattr(self.parent(), 'dashboard'):
+                self.parent().dashboard.refresh_stats()
+
+            show_information(
+                self.theme_manager,
+                "Pull Complete",
+                f"Successfully downloaded {file_count} file(s) from server and imported {imported_count} entries.",
+                parent=self,
+            )
+        except Exception as ex:
+            show_critical(
+                self.theme_manager,
+                "Pull Error",
+                f"Error during pull: {str(ex)}",
+                parent=self,
+            )
+        finally:
+            # Re-enable buttons
+            self.sync_now_btn.setEnabled(True)
+            self.pull_btn.setEnabled(True)
+            self.pull_btn.setText("Pull from Server")
+
     def _on_sync_now(self):
         """Handle Sync Now button click."""
         # Check if sync is configured
@@ -1037,10 +1141,11 @@ class SettingsView(QWidget):
                 if not self.app_state.sync_manager:
                     return  # Initialization failed, message already shown
             else:
-                QMessageBox.information(
-                    self,
+                show_information(
+                    self.theme_manager,
                     "Sync Not Configured",
                     "GitHub sync is not configured. Click 'Connect to GitHub' to set it up.",
+                    parent=self,
                 )
                 return
 
@@ -1053,22 +1158,37 @@ class SettingsView(QWidget):
             result = self.app_state.sync_manager.sync()
 
             if result.get("success"):
-                QMessageBox.information(
-                    self,
+                # Import any pulled files into the database
+                if result.get('pulled', 0) > 0:
+                    imported_count = self.app_state.entry_manager.import_from_espanso()
+
+                    # Refresh all UI components
+                    if hasattr(self.parent(), 'sidebar'):
+                        self.parent().sidebar.refresh_entries()
+                    if hasattr(self.parent(), 'status_bar'):
+                        self.parent().status_bar.update_entry_count()
+                    if hasattr(self.parent(), 'dashboard'):
+                        self.parent().dashboard.refresh_stats()
+
+                show_information(
+                    self.theme_manager,
                     "Sync Complete",
                     f"Sync completed successfully.\n\nPulled: {result.get('pulled', 0)} changes\nPushed: {result.get('pushed', 0)} changes",
+                    parent=self,
                 )
             else:
-                QMessageBox.warning(
-                    self,
+                show_warning(
+                    self.theme_manager,
                     "Sync Failed",
                     f"Sync failed: {result.get('error', 'Unknown error')}",
+                    parent=self,
                 )
         except Exception as ex:
-            QMessageBox.critical(
-                self,
+            show_critical(
+                self.theme_manager,
                 "Sync Error",
                 f"Error during sync: {str(ex)}",
+                parent=self,
             )
         finally:
             # Re-enable button
@@ -1092,8 +1212,9 @@ class SettingsView(QWidget):
         # Update the auto-sync checkbox
         self.auto_sync_checkbox.setChecked(self.settings.auto_sync)
 
-        # Update UI state to show Sync Now button
+        # Update UI state to show sync buttons
         self.sync_now_btn.setVisible(True)
+        self.pull_btn.setVisible(True)
         self.connect_github_btn.setText("Settings")
 
         # Initialize sync manager
@@ -1110,10 +1231,11 @@ class SettingsView(QWidget):
         try:
             from espanded.sync import SyncManager
         except ImportError:
-            QMessageBox.warning(
-                self,
+            show_warning(
+                self.theme_manager,
                 "Sync Not Available",
                 "Sync functionality is not available. Please install httpx.",
+                parent=self,
             )
             return
 
@@ -1146,23 +1268,26 @@ class SettingsView(QWidget):
             if sync_manager.test_connection():
                 self.app_state.sync_manager = sync_manager
                 if show_success_message:
-                    QMessageBox.information(
-                        self,
+                    show_information(
+                        self.theme_manager,
                         "Connected",
                         f"Successfully connected to GitHub!\n\nRepository: {settings.github_repo}\n\nYou can now use Sync Now.",
+                        parent=self,
                     )
             else:
-                QMessageBox.warning(
-                    self,
+                show_warning(
+                    self.theme_manager,
                     "Connection Failed",
                     "Could not connect to GitHub. Please check your token and repository.",
+                    parent=self,
                 )
 
         except Exception as e:
-            QMessageBox.critical(
-                self,
+            show_critical(
+                self.theme_manager,
                 "Error",
                 f"Failed to initialize sync: {str(e)}",
+                parent=self,
             )
 
     def _on_save(self):
@@ -1248,7 +1373,17 @@ class SettingsView(QWidget):
             if theme_changed:
                 self.theme_changed.emit()
 
-            QMessageBox.information(self, "Settings Saved", "Settings saved successfully")
+            show_information(
+                self.theme_manager,
+                "Settings Saved",
+                "Settings saved successfully.",
+                parent=self,
+            )
 
         except Exception as ex:
-            QMessageBox.critical(self, "Error", f"Error saving settings: {str(ex)}")
+            show_critical(
+                self.theme_manager,
+                "Error",
+                f"Error saving settings: {str(ex)}",
+                parent=self,
+            )

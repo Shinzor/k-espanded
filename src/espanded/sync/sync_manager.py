@@ -2,7 +2,7 @@
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -126,14 +126,18 @@ class SyncManager:
                     logger.error(f"Failed to push {rel_path}: {e}")
                     raise SyncError(f"Failed to push {rel_path}: {e}")
 
-            self.last_sync = datetime.now()
+            self.last_sync = datetime.now(tz=timezone.utc)
             return results
 
         finally:
             self.is_syncing = False
 
-    def pull(self) -> dict[str, str]:
+    def pull(self, force: bool = False) -> dict[str, str]:
         """Pull remote changes from GitHub.
+
+        Args:
+            force: If True, overwrites all local files with remote versions
+                   regardless of modification time (useful for initial sync)
 
         Returns:
             Dict of {file_path: status} where status is "created", "updated", or "deleted"
@@ -172,7 +176,7 @@ class SyncManager:
                     logger.error(f"Failed to pull {rel_path}: {e}")
                     raise SyncError(f"Failed to pull {rel_path}: {e}")
 
-            self.last_sync = datetime.now()
+            self.last_sync = datetime.now(tz=timezone.utc)
             return results
 
         finally:
@@ -286,7 +290,7 @@ class SyncManager:
                         logger.error(f"Sync: Failed to pull {path}: {e}")
                         results[path] = f"error: {e}"
 
-            self.last_sync = datetime.now()
+            self.last_sync = datetime.now(tz=timezone.utc)
             self.resolver.clear_conflicts()
 
             logger.info(f"Sync complete: pushed={pushed_count}, pulled={pulled_count}")
@@ -406,7 +410,7 @@ class SyncManager:
             for file_path in dir_path.glob("*.yml"):
                 rel_path = f"{dir_name}/{file_path.name}"
                 content = file_path.read_text(encoding="utf-8")
-                modified = datetime.fromtimestamp(file_path.stat().st_mtime)
+                modified = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
                 files[rel_path] = (content, modified)
 
         return files

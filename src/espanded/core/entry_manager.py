@@ -305,14 +305,23 @@ class EntryManager:
         # Reload Espanso
         self.espanso.reload()
 
-    def import_from_espanso(self) -> int:
+    def import_from_espanso(self, clear_existing: bool = False) -> int:
         """Import entries from existing Espanso configuration.
+
+        Args:
+            clear_existing: If True, delete all existing entries before importing
 
         Returns:
             Number of entries imported.
         """
         if not self.espanso.exists():
             return 0
+
+        # Clear existing entries if requested
+        if clear_existing:
+            all_existing = self.db.get_all_entries(include_deleted=True)
+            for entry in all_existing:
+                self.db.permanent_delete_entry(entry.id)
 
         all_entries = self.yaml_handler.read_all_match_files(self.espanso.config_path)
         count = 0
