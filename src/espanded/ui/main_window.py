@@ -521,14 +521,18 @@ class MainWindow(QMainWindow):
         edge = 0
         margin = self._resize_margin
 
+        # Left edge
         if pos.x() <= margin:
             edge |= self.EDGE_LEFT
-        elif pos.x() >= self.width() - margin:
+        # Right edge
+        if pos.x() >= self.width() - margin:
             edge |= self.EDGE_RIGHT
 
+        # Top edge (allow resizing from within title bar)
         if pos.y() <= margin:
             edge |= self.EDGE_TOP
-        elif pos.y() >= self.height() - margin:
+        # Bottom edge
+        if pos.y() >= self.height() - margin:
             edge |= self.EDGE_BOTTOM
 
         return edge
@@ -619,6 +623,13 @@ class MainWindow(QMainWindow):
             self._resize_edge = 0
             self._resize_start_pos = None
             self._resize_start_geom = None
+            # Reset cursor after resize
+            self.unsetCursor()
+
+    def leaveEvent(self, event):
+        """Handle mouse leaving the window - reset cursor."""
+        self.unsetCursor()
+        super().leaveEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         """Handle double-click on title bar to maximize/restore."""

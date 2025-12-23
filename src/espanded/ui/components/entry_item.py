@@ -108,6 +108,8 @@ class EntryItem(QWidget):
                 tag_container = QFrame()
                 tag_container.setFrameShape(QFrame.Shape.NoFrame)
                 tag_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # Enable styling
+                tag_container.setMinimumHeight(24)  # Ensure enough height for rounded corners
+                tag_container.setMaximumHeight(24)
                 tag_container.setStyleSheet(
                     f"""
                     QFrame {{

@@ -33,6 +33,8 @@ class TagColorManager:
         self._tag_colors: Dict[str, str] = {}
         # Default color for unassigned tags
         self._default_color = "blue"
+        # Reference to app_state (set after initialization)
+        self._app_state = None
 
     def get_color(self, tag: str) -> dict:
         """Get the color scheme for a tag.
@@ -55,6 +57,7 @@ class TagColorManager:
         """
         if color_key in TAG_COLORS:
             self._tag_colors[tag] = color_key
+            self._save_to_settings()
 
     def get_tag_color_key(self, tag: str) -> str:
         """Get the color key for a tag.
@@ -75,6 +78,7 @@ class TagColorManager:
         """
         if tag in self._tag_colors:
             del self._tag_colors[tag]
+            self._save_to_settings()
 
     def get_all_colors(self) -> Dict[str, str]:
         """Get all tag color assignments.
@@ -103,6 +107,25 @@ class TagColorManager:
             Dict mapping tag names to color keys
         """
         return self._tag_colors.copy()
+
+    def set_app_state(self, app_state):
+        """Set the app_state reference for persistence.
+
+        Args:
+            app_state: Application state instance
+        """
+        self._app_state = app_state
+        # Load colors from settings
+        if app_state and app_state.settings:
+            self._tag_colors = app_state.settings.tag_colors.copy()
+
+    def _save_to_settings(self):
+        """Save current tag colors to settings."""
+        if self._app_state and self._app_state.settings:
+            self._app_state.settings.tag_colors = self._tag_colors.copy()
+            # Save settings to disk
+            from espanded.core.app_state import save_settings
+            save_settings(self._app_state.settings)
 
 
 # Singleton instance

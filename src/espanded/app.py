@@ -61,6 +61,12 @@ def create_app() -> tuple[MainWindow | None, dict]:
         app_state = get_app_state()
         print("✓ App state initialized")
 
+        # Initialize tag color manager with app_state
+        from espanded.ui.tag_colors import get_tag_color_manager
+        tag_color_manager = get_tag_color_manager()
+        tag_color_manager.set_app_state(app_state)
+        print("✓ Tag color manager initialized")
+
         # Load custom fonts
         print("[2/8] Loading custom fonts...")
         font_family = load_custom_fonts()

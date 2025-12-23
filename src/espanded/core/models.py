@@ -148,6 +148,7 @@ class Settings:
     default_prefix: str = ":"
     theme: str = "system"  # light, dark, system
     custom_colors: dict[str, str] = field(default_factory=dict)
+    tag_colors: dict[str, str] = field(default_factory=dict)  # Tag name -> color key mapping
 
     # Hotkeys (using 'e' - backtick has issues on Windows with pynput)
     quick_add_hotkey: str = "<ctrl>+<alt>+e"
@@ -178,6 +179,7 @@ class Settings:
             "default_prefix": self.default_prefix,
             "theme": self.theme,
             "custom_colors": self.custom_colors,
+            "tag_colors": self.tag_colors,
             "quick_add_hotkey": self.quick_add_hotkey,
             "hotkeys_enabled": self.hotkeys_enabled,
             "minimize_to_tray": self.minimize_to_tray,
@@ -206,6 +208,7 @@ class Settings:
             default_prefix=data.get("default_prefix", ":"),
             theme=data.get("theme", "system"),
             custom_colors=data.get("custom_colors", {}),
+            tag_colors=data.get("tag_colors", {}),
             quick_add_hotkey=data.get("quick_add_hotkey", "<ctrl>+<alt>+e"),
             hotkeys_enabled=data.get("hotkeys_enabled", True),
             minimize_to_tray=data.get("minimize_to_tray", True),
