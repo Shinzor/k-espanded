@@ -129,6 +129,10 @@ class Dashboard(QWidget):
 
         content_layout.addWidget(row2)
 
+        # Third row: Quick Actions
+        actions_card = self._create_quick_actions_card()
+        content_layout.addWidget(actions_card)
+
         content_layout.addStretch()
         return content
 
@@ -390,6 +394,112 @@ class Dashboard(QWidget):
         item_layout.addWidget(desc_label, stretch=1)
 
         return item
+
+    def _create_quick_actions_card(self) -> QFrame:
+        """Create quick actions card with commonly used features."""
+        colors = self.theme_manager.colors
+
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {colors.bg_surface};
+                border-radius: 12px;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        # Title
+        title = QLabel("Quick Actions")
+        title.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: 600;
+            color: {colors.text_primary};
+            background: transparent;
+        """)
+        layout.addWidget(title)
+
+        # Actions row
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(12)
+
+        # Tag Colors button
+        tag_colors_btn = QPushButton("🎨 Customize Tag Colors")
+        tag_colors_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tag_colors_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 8px;
+                padding: 12px 20px;
+                font-size: 14px;
+                font-weight: 500;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """)
+        tag_colors_btn.clicked.connect(self._on_customize_tag_colors)
+        actions_row.addWidget(tag_colors_btn)
+
+        # Settings button
+        settings_btn = QPushButton("⚙️ Settings")
+        settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.bg_elevated};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border_default};
+                border-radius: 8px;
+                padding: 12px 20px;
+                font-size: 14px;
+                font-weight: 500;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.bg_base};
+                border-color: {colors.primary};
+            }}
+        """)
+        settings_btn.clicked.connect(self._on_open_settings)
+        actions_row.addWidget(settings_btn)
+
+        actions_row.addStretch()
+        layout.addLayout(actions_row)
+
+        layout.addStretch()
+        return card
+
+    def _on_customize_tag_colors(self):
+        """Open tag color customization dialog."""
+        from espanded.ui.components.tag_color_dialog import TagColorDialog
+
+        # Get all unique tags from all entries
+        all_entries = self.app_state.entry_manager.get_all_entries()
+        all_tags = []
+        for entry in all_entries:
+            all_tags.extend(entry.tags)
+
+        # Open dialog
+        dialog = TagColorDialog(self.theme_manager, all_tags, self)
+        dialog.colors_changed.connect(self._on_tag_colors_changed)
+        dialog.show_centered()
+        dialog.exec()
+
+    def _on_tag_colors_changed(self):
+        """Handle tag color changes - refresh UI to show new colors."""
+        # Notify main window to refresh sidebar
+        if hasattr(self.parent(), 'sidebar'):
+            self.parent().sidebar.refresh_entries()
+
+    def _on_open_settings(self):
+        """Navigate to settings."""
+        if hasattr(self.parent(), 'navigate_to_settings'):
+            self.parent().navigate_to_settings()
 
     def refresh_stats(self):
         """Refresh dashboard statistics."""

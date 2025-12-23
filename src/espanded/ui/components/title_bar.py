@@ -15,6 +15,7 @@ class TitleBar(QWidget):
     maximize_clicked = Signal()
     close_clicked = Signal()
     settings_clicked = Signal()
+    title_clicked = Signal()  # Navigate to dashboard
 
     def __init__(self, theme_manager: ThemeManager, parent=None):
         super().__init__(parent)
@@ -53,18 +54,26 @@ class TitleBar(QWidget):
         layout.setContentsMargins(12, 0, 8, 0)
         layout.setSpacing(8)
 
-        # App title (draggable area)
-        self.title_label = QLabel("Espanded")
-        self.title_label.setStyleSheet(f"""
-            QLabel {{
+        # App title (clickable to return to dashboard)
+        self.title_button = QPushButton("Espanded")
+        self.title_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.title_button.setStyleSheet(f"""
+            QPushButton {{
                 color: {colors.text_primary};
                 font-size: 14px;
                 font-weight: 600;
                 background-color: transparent;
-                padding: 0px;
+                border: none;
+                padding: 6px 8px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                color: {colors.primary};
+                background-color: {colors.entry_hover};
             }}
         """)
-        layout.addWidget(self.title_label)
+        self.title_button.clicked.connect(self.title_clicked.emit)
+        layout.addWidget(self.title_button)
 
         # Spacer (draggable area)
         spacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)

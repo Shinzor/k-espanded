@@ -193,6 +193,7 @@ class MainWindow(QMainWindow):
         self.title_bar.maximize_clicked.connect(self._on_maximize)
         self.title_bar.close_clicked.connect(self._on_close)
         self.title_bar.settings_clicked.connect(self._on_settings)
+        self.title_bar.title_clicked.connect(self.show_dashboard)
 
         # Sidebar signals
         self.sidebar.entry_selected.connect(self._on_entry_selected)
@@ -378,6 +379,10 @@ class MainWindow(QMainWindow):
         """Switch to dashboard view."""
         self.content_stack.setCurrentIndex(0)
         self.sidebar.clear_selection()
+
+    def navigate_to_settings(self):
+        """Navigate to settings view."""
+        self._on_settings()
 
     def show_editor(self, entry: Entry | None = None):
         """Switch to entry editor view."""

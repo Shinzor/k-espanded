@@ -1,6 +1,6 @@
 """Entry list item widget for displaying entry information."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu, QFrame
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QMouseEvent, QCursor
 
@@ -104,13 +104,16 @@ class EntryItem(QWidget):
                 # Get color for this tag
                 tag_colors_dict = tag_color_manager.get_color(tag)
 
-                # Use QWidget container for proper rounded corners
-                tag_container = QWidget()
+                # Use QFrame container for proper rounded corners (QFrame renders borders better than QWidget)
+                tag_container = QFrame()
+                tag_container.setFrameShape(QFrame.Shape.NoFrame)
+                tag_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # Enable styling
                 tag_container.setStyleSheet(
                     f"""
-                    QWidget {{
+                    QFrame {{
                         background-color: {tag_colors_dict['bg']};
                         border-radius: 12px;
+                        border: none;
                     }}
                 """
                 )
