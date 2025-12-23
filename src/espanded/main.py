@@ -4,6 +4,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 
 from espanded.app import create_app
 
@@ -30,6 +31,17 @@ def main():
     if main_window is None:
         print("Failed to create main window - exiting")
         return 1
+
+    # Set global font
+    from PySide6.QtGui import QFontDatabase
+    font_families = QFontDatabase().families()
+    if "Lexend" in font_families:
+        app_font = QFont("Lexend")
+        app_font.setPointSize(10)
+        app.setFont(app_font)
+        print("✓ Lexend font applied globally")
+    else:
+        print("⚠ Lexend font not found in available families")
 
     # Apply theme to application
     from espanded.core.app_state import get_app_state

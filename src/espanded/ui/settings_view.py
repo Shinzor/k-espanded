@@ -28,6 +28,7 @@ from espanded.ui.components.message_dialog import (
     show_critical,
     show_question,
 )
+from espanded.ui.components.tag_color_dialog import TagColorDialog
 from espanded.ui.github_wizard import GitHubWizard
 from espanded.core.app_state import get_app_state
 from espanded.core.models import Settings
@@ -413,6 +414,48 @@ class SettingsView(QWidget):
             }}
         """)
         content_layout.addWidget(help_text)
+
+        # Tag Colors
+        tag_colors_label = QLabel("Tag Colors")
+        tag_colors_label.setFont(theme_label_font)
+        tag_colors_label.setStyleSheet(f"""
+            QLabel {{
+                color: {colors.text_primary};
+                background-color: transparent;
+                margin-top: 8px;
+            }}
+        """)
+        content_layout.addWidget(tag_colors_label)
+
+        tag_colors_btn = QPushButton("Customize Tag Colors")
+        tag_colors_btn.setMaximumWidth(200)
+        tag_colors_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {colors.primary};
+                color: {colors.text_inverse};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.primary_hover};
+            }}
+        """)
+        tag_colors_btn.clicked.connect(self._on_customize_tag_colors)
+        tag_colors_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        content_layout.addWidget(tag_colors_btn)
+
+        tag_colors_help = QLabel("Customize colors for your tags")
+        tag_colors_help.setStyleSheet(f"""
+            QLabel {{
+                font-size: 11px;
+                color: {colors.text_tertiary};
+                background-color: transparent;
+            }}
+        """)
+        content_layout.addWidget(tag_colors_help)
 
         return self._create_section_card("Appearance", "", content)
 
@@ -1026,6 +1069,25 @@ class SettingsView(QWidget):
                 "Settings have been reset to defaults.",
                 parent=self,
             )
+
+    def _on_customize_tag_colors(self):
+        """Open tag color customization dialog."""
+        # Get all unique tags from all entries
+        all_entries = self.app_state.entry_manager.get_all_entries()
+        all_tags = []
+        for entry in all_entries:
+            all_tags.extend(entry.tags)
+
+        # Open dialog
+        dialog = TagColorDialog(self.theme_manager, all_tags, self)
+        dialog.colors_changed.connect(self._on_tag_colors_changed)
+        dialog.exec()
+
+    def _on_tag_colors_changed(self):
+        """Handle tag color changes - refresh UI to show new colors."""
+        # Notify main window to refresh sidebar
+        if hasattr(self.parent(), 'sidebar'):
+            self.parent().sidebar.refresh_entries()
 
     def _rebuild_ui(self):
         """Rebuild UI with current settings values."""

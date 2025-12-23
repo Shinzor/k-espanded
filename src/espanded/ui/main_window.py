@@ -48,6 +48,12 @@ class MainWindow(QMainWindow):
         self._drag_pos: QPoint | None = None
         self._is_maximized = False
 
+        # Window resize state
+        self._resize_edge: Qt.Edge | None = None
+        self._resize_start_pos: QPoint | None = None
+        self._resize_start_geom: tuple | None = None  # (x, y, w, h)
+        self._resize_margin = 8  # Pixels from edge to detect resize
+
         # Quick add popup reference (to prevent garbage collection)
         self._quick_add_popup = None
 
@@ -62,6 +68,9 @@ class MainWindow(QMainWindow):
         # Frameless window
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
+        # Enable mouse tracking for resize cursor updates
+        self.setMouseTracking(True)
 
         # Set window icon
         self.setWindowIcon(create_app_icon())
@@ -488,27 +497,116 @@ class MainWindow(QMainWindow):
             # Normal close - accept the event
             event.accept()
 
+    def _get_resize_edge(self, pos: QPoint) -> int:
+        """Determine which edge(s) the mouse is near for resizing.
+
+        Returns:
+            Combination of Qt.Edge flags, or 0 if not near any edge
+        """
+        if self._is_maximized:
+            return 0
+
+        edge = 0
+        margin = self._resize_margin
+
+        if pos.x() <= margin:
+            edge |= Qt.Edge.LeftEdge
+        elif pos.x() >= self.width() - margin:
+            edge |= Qt.Edge.RightEdge
+
+        if pos.y() <= margin:
+            edge |= Qt.Edge.TopEdge
+        elif pos.y() >= self.height() - margin:
+            edge |= Qt.Edge.BottomEdge
+
+        return edge
+
+    def _update_cursor_for_resize(self, edge: int):
+        """Update cursor shape based on resize edge."""
+        if edge == 0:
+            self.unsetCursor()
+        elif edge == (Qt.Edge.TopEdge | Qt.Edge.LeftEdge) or edge == (Qt.Edge.BottomEdge | Qt.Edge.RightEdge):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif edge == (Qt.Edge.TopEdge | Qt.Edge.RightEdge) or edge == (Qt.Edge.BottomEdge | Qt.Edge.LeftEdge):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif edge & (Qt.Edge.LeftEdge | Qt.Edge.RightEdge):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif edge & (Qt.Edge.TopEdge | Qt.Edge.BottomEdge):
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+
     def mousePressEvent(self, event: QMouseEvent):
-        """Handle mouse press for window dragging."""
-        # Only allow dragging from title bar
+        """Handle mouse press for window dragging and resizing."""
         if event.button() == Qt.MouseButton.LeftButton:
-            # Check if click is within title bar bounds
+            # Check for resize edge first
+            edge = self._get_resize_edge(event.pos())
+            if edge != 0:
+                self._resize_edge = edge
+                self._resize_start_pos = event.globalPosition().toPoint()
+                self._resize_start_geom = (self.x(), self.y(), self.width(), self.height())
+                return
+
+            # Otherwise, check for dragging from title bar
             title_bar_rect = self.title_bar.geometry()
             if title_bar_rect.contains(event.pos()):
                 self._drag_pos = event.globalPosition().toPoint()
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        """Handle mouse move for window dragging."""
+        """Handle mouse move for window dragging, resizing, and cursor updates."""
+        # If resizing
+        if self._resize_edge is not None and self._resize_start_pos is not None:
+            delta = event.globalPosition().toPoint() - self._resize_start_pos
+            x, y, w, h = self._resize_start_geom
+
+            new_x, new_y = x, y
+            new_w, new_h = w, h
+
+            if self._resize_edge & Qt.Edge.LeftEdge:
+                new_x = x + delta.x()
+                new_w = w - delta.x()
+            elif self._resize_edge & Qt.Edge.RightEdge:
+                new_w = w + delta.x()
+
+            if self._resize_edge & Qt.Edge.TopEdge:
+                new_y = y + delta.y()
+                new_h = h - delta.y()
+            elif self._resize_edge & Qt.Edge.BottomEdge:
+                new_h = h + delta.y()
+
+            # Enforce minimum size
+            min_w = self.minimumWidth()
+            min_h = self.minimumHeight()
+
+            if new_w < min_w:
+                if self._resize_edge & Qt.Edge.LeftEdge:
+                    new_x = x + w - min_w
+                new_w = min_w
+
+            if new_h < min_h:
+                if self._resize_edge & Qt.Edge.TopEdge:
+                    new_y = y + h - min_h
+                new_h = min_h
+
+            self.setGeometry(new_x, new_y, new_w, new_h)
+            return
+
+        # If dragging
         if self._drag_pos is not None and not self._is_maximized:
-            # Move window
             delta = event.globalPosition().toPoint() - self._drag_pos
             self.move(self.pos() + delta)
             self._drag_pos = event.globalPosition().toPoint()
+            return
+
+        # Update cursor based on edge proximity
+        edge = self._get_resize_edge(event.pos())
+        self._update_cursor_for_resize(edge)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        """Handle mouse release to stop dragging."""
+        """Handle mouse release to stop dragging and resizing."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = None
+            self._resize_edge = None
+            self._resize_start_pos = None
+            self._resize_start_geom = None
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         """Handle double-click on title bar to maximize/restore."""

@@ -104,6 +104,20 @@ class EntryItem(QWidget):
                 # Get color for this tag
                 tag_colors_dict = tag_color_manager.get_color(tag)
 
+                # Use QWidget container for proper rounded corners
+                tag_container = QWidget()
+                tag_container.setStyleSheet(
+                    f"""
+                    QWidget {{
+                        background-color: {tag_colors_dict['bg']};
+                        border-radius: 12px;
+                    }}
+                """
+                )
+                tag_layout = QHBoxLayout(tag_container)
+                tag_layout.setContentsMargins(10, 4, 10, 4)
+                tag_layout.setSpacing(0)
+
                 tag_chip = QLabel(tag)
                 tag_chip.setStyleSheet(
                     f"""
@@ -111,13 +125,14 @@ class EntryItem(QWidget):
                         font-size: 11px;
                         font-weight: 500;
                         color: {tag_colors_dict['text']};
-                        background-color: {tag_colors_dict['bg']};
-                        border-radius: 12px;
-                        padding: 4px 10px;
+                        background-color: transparent;
+                        border: none;
+                        padding: 0px;
                     }}
                 """
                 )
-                tags_row.addWidget(tag_chip)
+                tag_layout.addWidget(tag_chip)
+                tags_row.addWidget(tag_container)
 
             # Show "+N more" if there are more tags
             if len(self.entry.tags) > 3:

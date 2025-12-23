@@ -13,6 +13,7 @@ from espanded.ui.theme import ThemeManager, ThemeSettings
 from espanded.ui.main_window import MainWindow
 from espanded.ui.system_tray import SystemTray
 from espanded.ui.quick_add import QuickAddPopup
+from espanded.ui.fonts import load_custom_fonts
 from espanded.services.hotkey_service import get_hotkey_service
 from espanded.services.autocomplete_service import init_autocomplete_service, get_autocomplete_service
 from espanded.hotkeys.listener import get_keystroke_monitor
@@ -56,17 +57,25 @@ def create_app() -> tuple[MainWindow | None, dict]:
 
     try:
         # Initialize app state
-        print("[1/7] Initializing app state...")
+        print("[1/8] Initializing app state...")
         app_state = get_app_state()
         print("✓ App state initialized")
 
+        # Load custom fonts
+        print("[2/8] Loading custom fonts...")
+        font_family = load_custom_fonts()
+        if font_family:
+            print(f"✓ Custom font loaded: {font_family}")
+        else:
+            print("⚠ Custom font not loaded, using system default")
+
         # Load settings
-        print("[2/7] Loading settings...")
+        print("[3/8] Loading settings...")
         settings = app_state.settings
         print(f"✓ Settings loaded: theme={settings.theme}, has_imported={settings.has_imported}")
 
         # Initialize theme manager
-        print("[3/7] Initializing theme manager...")
+        print("[4/8] Initializing theme manager...")
         theme_settings = ThemeSettings(
             theme=settings.theme,
             custom_colors=settings.custom_colors,
