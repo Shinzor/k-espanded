@@ -48,11 +48,18 @@ class MainWindow(QMainWindow):
         self._drag_pos: QPoint | None = None
         self._is_maximized = False
 
-        # Window resize state
-        self._resize_edge: Qt.Edge | None = None
+        # Window resize state (using integer flags for edges)
+        self._resize_edge: int = 0
         self._resize_start_pos: QPoint | None = None
         self._resize_start_geom: tuple | None = None  # (x, y, w, h)
         self._resize_margin = 8  # Pixels from edge to detect resize
+
+        # Edge flags
+        self.EDGE_NONE = 0
+        self.EDGE_LEFT = 1
+        self.EDGE_RIGHT = 2
+        self.EDGE_TOP = 4
+        self.EDGE_BOTTOM = 8
 
         # Quick add popup reference (to prevent garbage collection)
         self._quick_add_popup = None
@@ -501,7 +508,7 @@ class MainWindow(QMainWindow):
         """Determine which edge(s) the mouse is near for resizing.
 
         Returns:
-            Combination of Qt.Edge flags, or 0 if not near any edge
+            Combination of edge flags, or 0 if not near any edge
         """
         if self._is_maximized:
             return 0
@@ -510,14 +517,14 @@ class MainWindow(QMainWindow):
         margin = self._resize_margin
 
         if pos.x() <= margin:
-            edge |= Qt.Edge.LeftEdge
+            edge |= self.EDGE_LEFT
         elif pos.x() >= self.width() - margin:
-            edge |= Qt.Edge.RightEdge
+            edge |= self.EDGE_RIGHT
 
         if pos.y() <= margin:
-            edge |= Qt.Edge.TopEdge
+            edge |= self.EDGE_TOP
         elif pos.y() >= self.height() - margin:
-            edge |= Qt.Edge.BottomEdge
+            edge |= self.EDGE_BOTTOM
 
         return edge
 
@@ -525,13 +532,13 @@ class MainWindow(QMainWindow):
         """Update cursor shape based on resize edge."""
         if edge == 0:
             self.unsetCursor()
-        elif edge == (Qt.Edge.TopEdge | Qt.Edge.LeftEdge) or edge == (Qt.Edge.BottomEdge | Qt.Edge.RightEdge):
+        elif edge == (self.EDGE_TOP | self.EDGE_LEFT) or edge == (self.EDGE_BOTTOM | self.EDGE_RIGHT):
             self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-        elif edge == (Qt.Edge.TopEdge | Qt.Edge.RightEdge) or edge == (Qt.Edge.BottomEdge | Qt.Edge.LeftEdge):
+        elif edge == (self.EDGE_TOP | self.EDGE_RIGHT) or edge == (self.EDGE_BOTTOM | self.EDGE_LEFT):
             self.setCursor(Qt.CursorShape.SizeBDiagCursor)
-        elif edge & (Qt.Edge.LeftEdge | Qt.Edge.RightEdge):
+        elif edge & (self.EDGE_LEFT | self.EDGE_RIGHT):
             self.setCursor(Qt.CursorShape.SizeHorCursor)
-        elif edge & (Qt.Edge.TopEdge | Qt.Edge.BottomEdge):
+        elif edge & (self.EDGE_TOP | self.EDGE_BOTTOM):
             self.setCursor(Qt.CursorShape.SizeVerCursor)
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -553,23 +560,23 @@ class MainWindow(QMainWindow):
     def mouseMoveEvent(self, event: QMouseEvent):
         """Handle mouse move for window dragging, resizing, and cursor updates."""
         # If resizing
-        if self._resize_edge is not None and self._resize_start_pos is not None:
+        if self._resize_edge != 0 and self._resize_start_pos is not None:
             delta = event.globalPosition().toPoint() - self._resize_start_pos
             x, y, w, h = self._resize_start_geom
 
             new_x, new_y = x, y
             new_w, new_h = w, h
 
-            if self._resize_edge & Qt.Edge.LeftEdge:
+            if self._resize_edge & self.EDGE_LEFT:
                 new_x = x + delta.x()
                 new_w = w - delta.x()
-            elif self._resize_edge & Qt.Edge.RightEdge:
+            elif self._resize_edge & self.EDGE_RIGHT:
                 new_w = w + delta.x()
 
-            if self._resize_edge & Qt.Edge.TopEdge:
+            if self._resize_edge & self.EDGE_TOP:
                 new_y = y + delta.y()
                 new_h = h - delta.y()
-            elif self._resize_edge & Qt.Edge.BottomEdge:
+            elif self._resize_edge & self.EDGE_BOTTOM:
                 new_h = h + delta.y()
 
             # Enforce minimum size
@@ -577,12 +584,12 @@ class MainWindow(QMainWindow):
             min_h = self.minimumHeight()
 
             if new_w < min_w:
-                if self._resize_edge & Qt.Edge.LeftEdge:
+                if self._resize_edge & self.EDGE_LEFT:
                     new_x = x + w - min_w
                 new_w = min_w
 
             if new_h < min_h:
-                if self._resize_edge & Qt.Edge.TopEdge:
+                if self._resize_edge & self.EDGE_TOP:
                     new_y = y + h - min_h
                 new_h = min_h
 
@@ -604,7 +611,7 @@ class MainWindow(QMainWindow):
         """Handle mouse release to stop dragging and resizing."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = None
-            self._resize_edge = None
+            self._resize_edge = 0
             self._resize_start_pos = None
             self._resize_start_geom = None
 

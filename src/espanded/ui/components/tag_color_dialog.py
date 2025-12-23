@@ -11,39 +11,55 @@ from PySide6.QtWidgets import (
     QFrame,
     QComboBox,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import QColor, QCursor, QMouseEvent
 
 from espanded.ui.theme import ThemeManager
 from espanded.ui.tag_colors import get_tag_color_manager, TAG_COLORS
+from espanded.ui.icon import create_app_icon
 
 
 class TagColorDialog(QDialog):
-    """Dialog for customizing tag colors."""
+    """Frameless, draggable dialog for customizing tag colors."""
 
     colors_changed = Signal()
 
     def __init__(self, theme_manager: ThemeManager, all_tags: list[str], parent=None):
-        super().__init__(parent)
+        super().__init__(None)  # No parent to prevent issues
         self.theme_manager = theme_manager
         self.all_tags = sorted(set(all_tags))  # Unique, sorted tags
         self.tag_color_manager = get_tag_color_manager()
         self.color_combos = {}  # Map tag to QComboBox
+
+        # Drag state
+        self._drag_pos: QPoint | None = None
 
         self._setup_window()
         self._setup_ui()
 
     def _setup_window(self):
         """Configure window properties."""
-        self.setWindowTitle("Tag Colors")
-        self.setWindowFlags(Qt.WindowType.Dialog)
-        self.setMinimumSize(500, 400)
-        self.setMaximumSize(600, 600)
+        # Frameless, always on top, tool window
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Dialog
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
 
+        # Set window icon
+        self.setWindowIcon(create_app_icon())
+
+        # Fixed size
+        self.setFixedSize(520, 650)
+
+        # Apply theme with border
         colors = self.theme_manager.colors
         self.setStyleSheet(f"""
             QDialog {{
-                background-color: {colors.bg_base};
+                background-color: {colors.bg_surface};
+                border: 2px solid {colors.primary};
+                border-radius: 12px;
             }}
         """)
 
@@ -52,26 +68,60 @@ class TagColorDialog(QDialog):
         colors = self.theme_manager.colors
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(10)
 
-        # Header
-        header_label = QLabel("Customize Tag Colors")
-        header_label.setStyleSheet(f"""
+        # Header (draggable area)
+        self.header = QWidget()
+        self.header.setStyleSheet("background: transparent;")
+        self.header.setCursor(Qt.CursorShape.SizeAllCursor)
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+
+        title_label = QLabel("Customize Tag Colors")
+        title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: 18px;
-                font-weight: 600;
                 color: {colors.text_primary};
+                font-size: 15px;
+                font-weight: 600;
+                background: transparent;
             }}
         """)
-        layout.addWidget(header_label)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        # Close button
+        close_btn = QPushButton("X")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {colors.text_secondary};
+                border: none;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.error};
+                color: {colors.text_inverse};
+            }}
+        """)
+        close_btn.clicked.connect(self.accept)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(close_btn)
+
+        layout.addWidget(self.header)
 
         # Description
         desc_label = QLabel("Choose a color for each tag. Changes apply immediately.")
         desc_label.setStyleSheet(f"""
             QLabel {{
-                font-size: 12px;
+                font-size: 11px;
                 color: {colors.text_secondary};
+                background: transparent;
             }}
         """)
         layout.addWidget(desc_label)
@@ -80,7 +130,7 @@ class TagColorDialog(QDialog):
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFixedHeight(1)
-        separator.setStyleSheet(f"background-color: {colors.border_muted};")
+        separator.setStyleSheet(f"background-color: {colors.border_muted}; border: none;")
         layout.addWidget(separator)
 
         # Scroll area for tags
@@ -89,8 +139,24 @@ class TagColorDialog(QDialog):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet(f"""
             QScrollArea {{
-                background-color: {colors.bg_base};
+                background-color: transparent;
                 border: none;
+            }}
+            QScrollBar:vertical {{
+                background-color: {colors.bg_elevated};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {colors.primary};
+                border-radius: 4px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {colors.primary_hover};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
             }}
         """)
 
@@ -303,3 +369,37 @@ class TagColorDialog(QDialog):
                         break
 
         self.colors_changed.emit()
+
+    def show_centered(self):
+        """Show dialog centered on screen."""
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        x = (screen.width() - self.width()) // 2
+        y = (screen.height() - self.height()) // 2
+        self.move(x, y)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle mouse press for window dragging."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Check if click is within header bounds
+            header_rect = self.header.geometry()
+            if header_rect.contains(event.pos()):
+                self._drag_pos = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Handle mouse move for window dragging."""
+        if self._drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Handle mouse release to stop dragging."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = None
+        super().mouseReleaseEvent(event)

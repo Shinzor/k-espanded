@@ -1081,13 +1081,16 @@ class SettingsView(QWidget):
         # Open dialog
         dialog = TagColorDialog(self.theme_manager, all_tags, self)
         dialog.colors_changed.connect(self._on_tag_colors_changed)
+        dialog.show_centered()
         dialog.exec()
 
     def _on_tag_colors_changed(self):
         """Handle tag color changes - refresh UI to show new colors."""
+        print("[SettingsView] Tag colors changed, refreshing sidebar...")
         # Notify main window to refresh sidebar
         if hasattr(self.parent(), 'sidebar'):
             self.parent().sidebar.refresh_entries()
+            print("[SettingsView] Sidebar refreshed")
 
     def _rebuild_ui(self):
         """Rebuild UI with current settings values."""
